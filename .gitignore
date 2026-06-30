@@ -11,12 +11,15 @@ __pycache__/
 # Jupyter checkpoints
 .ipynb_checkpoints/
 
-# Model files
+# Model files (regenerated on each training run)
 *.keras
 *.pkl
 *.h5
 best_*.keras
 best_*.json
+model_*.keras
+model_*.json
+model_*.pkl
 
 # Plots/outputs (regenerated on each run)
 plots/
