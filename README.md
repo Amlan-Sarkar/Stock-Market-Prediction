@@ -1,10 +1,17 @@
 # 📈 Stock Market Price Prediction
 
-A multi-model machine learning system for stock price prediction using historical OHLCV data and technical indicators.
+A multi-model machine learning system for stock price prediction using historical OHLCV data and technical indicators, with a fully interactive Streamlit dashboard.
+
+![Python](https://img.shields.io/badge/Python-3.11-blue)
+![TensorFlow](https://img.shields.io/badge/TensorFlow-2.21-orange)
+![XGBoost](https://img.shields.io/badge/XGBoost-3.2-red)
+![Streamlit](https://img.shields.io/badge/Streamlit-1.58-FF4B4B)
+![License](https://img.shields.io/badge/License-MIT-green)
 
 ---
 
 ## 🧠 Models
+
 | Model | Type |
 |---|---|
 | Bidirectional LSTM | Deep Learning |
@@ -17,70 +24,230 @@ A multi-model machine learning system for stock price prediction using historica
 ---
 
 ## 📊 Features Used
-- Raw OHLCV: Open, High, Low, Close, Adj Close, Volume
-- Technical Indicators: RSI, MACD, MACD Signal, Bollinger Bands
+
+- **Raw OHLCV:** Open, High, Low, Close, Adj Close, Volume
+- **Technical Indicators:** RSI, MACD, MACD Signal, Bollinger Bands (Upper/Lower)
 
 ---
 
 ## ⚙️ Methodology
+
 - 80/20 train-validation split
-- MinMax normalization on training data only
-- 60-day look-back sequences
-- Tree models trained on % return targets to handle extrapolation
-- Neural nets trained on reduced 5-feature set to reduce overfitting
-- Inverse-MAE weighted ensemble
+- MinMax normalization fit on training data only (no data leakage)
+- 60-day look-back sequences for sequential models
+- Tree models (XGBoost, Random Forest) trained on **% return targets** instead of raw price levels to avoid extrapolation failure on out-of-range prices
+- Neural networks (BiLSTM, GRU) trained on a reduced 5-feature set (Close, Volume, RSI, MACD, MACD Signal) to reduce overfitting from highly collinear OHLC columns
+- Inverse-MAE weighted ensemble — models with lower validation error get proportionally higher blending weight
 
 ---
 
 ## 📈 Results
-| Model | RMSE | MAPE | R² |
-|---|---|---|---|
-| XGBoost | 18.55 | 1.27% | 0.85 |
-| Random Forest | 19.11 | 1.37% | 0.84 |
-| Ensemble | 21.00 | 1.57% | 0.80 |
-| Linear Regression | 26.12 | 1.90% | 0.70 |
-| GRU | 29.93 | 2.23% | 0.65 |
-| BiLSTM | 44.70 | 3.37% | 0.13 |
+
+| Model | RMSE | MAE | MAPE | R² | EVS | Directional Accuracy |
+|---|---|---|---|---|---|---|
+| **XGBoost** | **18.55** | **13.75** | **1.27%** | **0.85** | **0.85** | 53.23% |
+| Random Forest | 19.11 | 14.88 | 1.37% | 0.84 | 0.85 | 53.23% |
+| Ensemble | 21.00 | 17.11 | 1.57% | 0.80 | 0.82 | 51.61% |
+| Linear Regression | 26.12 | 20.55 | 1.90% | 0.70 | 0.70 | 48.39% |
+| GRU | 29.93 | 24.56 | 2.23% | 0.65 | 0.69 | 56.45% |
+| BiLSTM | 44.70 | 37.36 | 3.37% | 0.13 | 0.48 | 47.58% |
+
+> **Key finding:** Directional Accuracy across all models hovers near the 50% random-walk baseline, even though price-level regression metrics (R², MAPE) are strong. This is consistent with the weak form of the Efficient Market Hypothesis — short-term price *levels* show strong autocorrelation, but short-term price *direction* remains close to unpredictable.
+
+---
+
+## 🖥️ Live Dashboard
+
+The project includes a full Streamlit web application for interactive training, prediction, and visualization — no code required to use it.
+
+### Landing Page
+Clean upload interface — drop in your training and test Excel files, tune sequence length, epochs, and batch size from the sidebar.
+
+![App Landing](screenshots/00_general.png)
+
+### After Training
+Once training completes, KPI cards instantly surface the best-performing model per metric.
+
+![Trained Overview](screenshots/01_general.png)
+
+---
+
+## 📑 Dashboard Tabs
+
+### 1️⃣ Overview
+
+**Actual vs Predicted — All Models**
+A single chart overlays every model's predictions against the real closing price, making it easy to visually compare tracking accuracy.
+
+![Actual vs Predicted](screenshots/02_overview.png)
+
+**Regression Metrics Table**
+Full metrics table (RMSE, MAE, MAPE, R², EVS, DA) with the best value in each column automatically highlighted in green.
+
+![Regression Metrics](screenshots/03_overview.png)
+
+**Ensemble Weights**
+Shows exactly how much each model contributes to the final ensemble prediction, derived from inverse validation-MAE weighting.
+
+![Ensemble Weights](screenshots/04_overview.png)
+
+---
+
+### 2️⃣ Model Comparison
+
+**Metric Comparison — All Models**
+Six side-by-side bar charts (RMSE, MAE, MAPE, R², EVS, Directional Accuracy) for at-a-glance model ranking.
+
+![Metric Comparison](screenshots/05_model_comparison.png)
+
+**Predicted vs Actual Scatter Plots**
+Each model gets its own scatter plot against the perfect-prediction diagonal, with R² annotated directly on the chart.
+
+![Scatter Plots](screenshots/06_model_comparison.png)
+
+---
+
+### 3️⃣ Diagnostics
+
+**Training & Validation Loss Curves**
+Tracks BiLSTM and GRU convergence epoch-by-epoch — useful for spotting overfitting or unstable training.
+
+![Loss Curves](screenshots/07_diagnostics.png)
+
+**Residual Distributions**
+Histogram of prediction errors per model — a well-centered, narrow distribution around zero indicates a well-calibrated model.
+
+![Residual Distributions](screenshots/08_diagnostics.png)
+
+**Residual Scatter Plots**
+Residuals plotted against predicted values to check for heteroscedasticity or systematic bias.
+
+![Residual Scatter](screenshots/09_diagnostics.png)
+
+---
+
+### 4️⃣ Features
+
+**Feature Correlation Heatmap**
+Full correlation matrix across all 11 engineered features — reveals which raw price columns are redundant (Open/High/Low/Close/Adj Close/Bollinger Bands are ~0.99 correlated).
+
+![Correlation Heatmap](screenshots/10_features.png)
+
+**XGBoost Feature Importance**
+Aggregated importance (summed across all 60 timesteps) showing RSI and Volume as the most predictive features.
+
+![XGBoost Feature Importance](screenshots/11_features.png)
+
+**SHAP Summary Plot**
+Top 20 most impactful (feature, lag) pairs with readable names like `RSI_t-6`, explaining individual prediction-level feature impact.
+
+![SHAP Summary](screenshots/12_features.png)
+
+**SHAP Aggregated Feature Importance**
+Mean absolute SHAP value per feature, aggregated across all lags — confirms RSI as the dominant predictor for return-based XGBoost targets.
+
+![SHAP Feature Importance](screenshots/13_features.png)
 
 ---
 
 ## 🗂️ Project Structure
-├── STMPfinalfr.ipynb       # Main notebook
 
-├── app.py                  # Streamlit web app
-
-├── Trainset.xlsx           # Training data
-
-├── Testset.xlsx            # Test data
-
-├── requirements.txt        # Dependencies
+```
+Stock-Market-Prediction/
+│
+├── app.py                          # Streamlit web application
+├── requirements.txt                # Python dependencies
+├── README.md
+├── LICENSE
+├── .gitignore
+│
+├── notebook/
+│   └── STMPfinalfr.ipynb          # Main analysis notebook (Colab-ready)
+│
+├── data/
+│   ├── Trainset.xlsx              # Training data
+│   └── Testset.xlsx               # Test data
+│
+└── screenshots/
+    ├── 00_general.png             # App landing page
+    ├── 01_general.png             # Post-training overview
+    ├── 02_overview.png            # Actual vs Predicted
+    ├── 03_overview.png            # Regression metrics table
+    ├── 04_overview.png            # Ensemble weights
+    ├── 05_model_comparison.png    # Metric comparison bars
+    ├── 06_model_comparison.png    # Scatter plots
+    ├── 07_diagnostics.png         # Loss curves
+    ├── 08_diagnostics.png         # Residual distributions
+    ├── 09_diagnostics.png         # Residual scatter plots
+    ├── 10_features.png            # Correlation heatmap
+    ├── 11_features.png            # XGBoost feature importance
+    ├── 12_features.png            # SHAP summary
+    └── 13_features.png            # SHAP feature importance
+```
 
 ---
 
 ## 🚀 How to Run
 
-### Notebook (Google Colab)
-1. Upload `Trainset.xlsx` and `Testset.xlsx` to Colab
-2. Run all cells in order
+### Option A — Notebook (Google Colab)
+1. Open `notebook/STMPfinalfr.ipynb` in Google Colab
+2. Upload `data/Trainset.xlsx` and `data/Testset.xlsx` when prompted
+3. Run all cells in order
 
-### Streamlit App (Local)
+### Option B — Streamlit App (Local)
+
 ```bash
+# Clone the repository
+git clone https://github.com/Amlan-Sarkar/Stock-Market-Prediction.git
+cd Stock-Market-Prediction
+
+# Create and activate a virtual environment
+python -m venv .venv
+.venv\Scripts\activate        # Windows
+source .venv/bin/activate     # Mac/Linux
+
+# Install dependencies
 pip install -r requirements.txt
+
+# Run the app
 streamlit run app.py
 ```
+
+Then open `http://localhost:8501` in your browser and upload the Excel files from `data/`.
 
 ---
 
 ## 📦 Dependencies
-Install all dependencies:
+
+All dependencies are listed in `requirements.txt`:
+
 ```bash
 pip install -r requirements.txt
 ```
 
+Core libraries: `tensorflow`, `xgboost`, `scikit-learn`, `shap`, `streamlit`, `pandas`, `numpy`, `matplotlib`, `seaborn`, `openpyxl`
+
 ---
 
 ## 🔍 Key Findings
-- XGBoost and Random Forest outperform deep learning models on this dataset
-- Directional accuracy (~53%) is near random (50%) — consistent with weak-form market efficiency
-- High R² reflects price-level autocorrelation, not directional predictability
-  
+
+- **Tree-based models (XGBoost, Random Forest) consistently outperform deep learning models** (BiLSTM, GRU) on this dataset — a well-documented pattern in quantitative finance literature when working with moderate-sized, well-engineered tabular time series data.
+- **Directional Accuracy (~50-56%) is near the random-walk baseline** across all models, while price-level R² is strong (up to 0.85). This indicates the models are good at predicting *where* the price will be, but not *which direction* it will move — consistent with weak-form market efficiency.
+- **BiLSTM showed high run-to-run variance** (R² ranging from -0.56 to 0.22 across different random seeds), suggesting it requires more training data or architectural tuning to converge reliably on this dataset size.
+- **Predicting % returns instead of absolute price levels was essential for tree models** — XGBoost/Random Forest cannot extrapolate beyond the price range seen during training, so training them on bounded return targets (and reconstructing price from the previous close) avoided a flat-line prediction failure mode.
+
+---
+
+## 🛠️ Future Improvements
+
+- Time-series-aware cross-validation (`TimeSeriesSplit`) instead of a single train/validation split
+- Hyperparameter tuning via `GridSearchCV` / `RandomizedSearchCV` (XGBoost, Random Forest) and `KerasTuner` (neural networks)
+- Additional technical indicators (Stochastic Oscillator, ATR, OBV)
+- Multi-step-ahead forecasting instead of single-day-ahead prediction
+- Attention-based architectures (Transformer-style) for the sequential models
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License — see [LICENSE](LICENSE) for details.
