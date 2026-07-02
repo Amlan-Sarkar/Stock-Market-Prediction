@@ -172,9 +172,9 @@ Mean absolute SHAP value per feature, aggregated across all lags — confirms RS
 
 ---
 
-## 📁 Project Structure
+## 🗂️ Project Structure
 
-​```
+```
 Stock-Market-Prediction/
 ├── app.py                          # Streamlit web application
 ├── requirements.txt                # Python dependencies
@@ -201,7 +201,7 @@ Stock-Market-Prediction/
     ├── 11_features.png            # XGBoost feature importance
     ├── 12_features.png            # SHAP summary
     └── 13_features.png            # SHAP feature importance
-​```
+```
 
 ---
 
