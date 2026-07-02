@@ -172,24 +172,20 @@ Mean absolute SHAP value per feature, aggregated across all lags — confirms RS
 
 ---
 
-## 🗂️ Project Structure
+## 📁 Project Structure
 
 ​```
 Stock-Market-Prediction/
-│
 ├── app.py                          # Streamlit web application
 ├── requirements.txt                # Python dependencies
 ├── README.md
 ├── LICENSE
 ├── .gitignore
-│
 ├── notebook/
 │   └── STMPfinalfr.ipynb          # Main analysis notebook (Colab-ready)
-│
 ├── data/
 │   ├── Trainset.xlsx              # Training data
 │   └── Testset.xlsx               # Test data
-│
 └── screenshots/
     ├── 00_general.png             # App landing page
     ├── 01_general.png             # Post-training overview
@@ -204,7 +200,7 @@ Stock-Market-Prediction/
     ├── 10_features.png            # Correlation heatmap
     ├── 11_features.png            # XGBoost feature importance
     ├── 12_features.png            # SHAP summary
-    └── 13_features.png            # SHAP feature importance  
+    └── 13_features.png            # SHAP feature importance
 ​```
 
 ---
