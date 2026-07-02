@@ -32,12 +32,34 @@ A multi-model machine learning system for stock price prediction using historica
 
 ## ⚙️ Methodology
 
-- 80/20 train-validation split
+- 80/20 train-validation split — chosen as a simple, fast-to-iterate baseline while the model set was still changing frequently; flagged as a compromise (see Future Improvements — a rolling/expanding `TimeSeriesSplit` is the more rigorous choice for financial time series and is the planned next step).
 - MinMax normalization fit on training data only (no data leakage)
-- 60-day look-back sequences for sequential models
+- 60-day look-back sequences for sequential models — chosen to give BiLSTM/GRU roughly one trading quarter of context per prediction, balancing enough history to capture short-term momentum/RSI cycles against the added noise and training cost of longer windows.
 - Tree models (XGBoost, Random Forest) trained on **% return targets** instead of raw price levels to avoid extrapolation failure on out-of-range prices
 - Neural networks (BiLSTM, GRU) trained on a reduced 5-feature set (Close, Volume, RSI, MACD, MACD Signal) to reduce overfitting from highly collinear OHLC columns
-- Inverse-MAE weighted ensemble — models with lower validation error get proportionally higher blending weight
+- Inverse-MAE weighted ensemble — models with lower validation error get proportionally higher blending weight. Chosen over equal weighting because model quality varied a lot (BiLSTM's R² was unstable across seeds); chosen over a stacked meta-learner to avoid adding a second layer of overfitting risk on top of an already small validation set.
+
+---
+
+## 🧪 What I Tried and Rejected
+
+Not everything that got built made it into the final model set. Documenting the dead ends because they were as informative as what worked:
+
+- **CNN-LSTM hybrid.** Tried a CNN front-end to extract local patterns before feeding into an LSTM, expecting it to beat plain BiLSTM/GRU. It consistently produced negative R² across runs. Traced the failure to excessive temporal compression — the convolution + pooling stack was collapsing the 60-day sequence down to a resolution that threw away the exact short-term fluctuations the model needed to predict next-day price. Dropped it rather than keep tuning, since the architecture was fundamentally mismatched to a single-day-ahead prediction task on a dataset this size.
+- **Raw price-level targets for tree models.** Initial XGBoost/Random Forest versions trained directly on closing price. They flat-lined on any test data outside the training price range, since tree models can't extrapolate past values they've split on. Switched to predicting % returns and reconstructing price from the previous close, which fixed it.
+- **Full 11-feature set for neural networks.** Started BiLSTM/GRU with all engineered features. The correlation heatmap showed Open/High/Low/Close/Adj Close/Bollinger Bands sitting at ~0.99 correlation with each other, which was actively hurting the sequential models' training stability. Trimmed to a 5-feature set and got more consistent convergence.
+
+---
+
+## 🐛 Debugging Notes
+
+A few bugs were significant enough to be worth documenting, since finding and fixing them was a bigger part of the project than writing the original code:
+
+- **Boundary errors in technical indicator computation.** RSI/MACD/Bollinger Band calculations use rolling windows, so the first N rows of any indicator are undefined. Early versions silently propagated NaNs or miscomputed values at these boundaries instead of explicitly handling them.
+- **Silent length mismatch masked by slicing.** A mismatch between feature array length and target array length was being hidden by NumPy's silent slicing behavior instead of throwing an error — meant the model was training on misaligned sequence/target pairs before this was caught.
+- **Flat-line predictions from raw price targets.** Covered above under "What I Tried and Rejected" — showed up first as a debugging problem (predictions collapsing to a constant) before the root cause (extrapolation failure) was identified.
+- **Unreadable SHAP plots.** Default SHAP output on the lagged feature set produced illegible labels like `feature_47` instead of anything interpretable. Fixed by generating readable `(feature, lag)` names like `RSI_t-6` before plotting.
+- **Streamlit `TypeError` from `verbose=0`.** A sklearn model call was passed `verbose=0`, which some sklearn estimators don't accept as a valid type in that context — surfaced as a runtime `TypeError` in the Streamlit app rather than at training time, which made it slower to trace back to the source.
 
 ---
 
@@ -152,7 +174,7 @@ Mean absolute SHAP value per feature, aggregated across all lags — confirms RS
 
 ## 🗂️ Project Structure
 
-```
+​```
 Stock-Market-Prediction/
 │
 ├── app.py                          # Streamlit web application
@@ -182,8 +204,8 @@ Stock-Market-Prediction/
     ├── 10_features.png            # Correlation heatmap
     ├── 11_features.png            # XGBoost feature importance
     ├── 12_features.png            # SHAP summary
-    └── 13_features.png            # SHAP feature importance
-```
+    └── 13_features.png            # SHAP feature importance  
+​```
 
 ---
 
@@ -233,7 +255,7 @@ Core libraries: `tensorflow`, `xgboost`, `scikit-learn`, `shap`, `streamlit`, `p
 
 - **Tree-based models (XGBoost, Random Forest) consistently outperform deep learning models** (BiLSTM, GRU) on this dataset — a well-documented pattern in quantitative finance literature when working with moderate-sized, well-engineered tabular time series data.
 - **Directional Accuracy (~50-56%) is near the random-walk baseline** across all models, while price-level R² is strong (up to 0.85). This indicates the models are good at predicting *where* the price will be, but not *which direction* it will move — consistent with weak-form market efficiency.
-- **BiLSTM showed high run-to-run variance** (R² ranging from -0.56 to 0.22 across different random seeds), suggesting it requires more training data or architectural tuning to converge reliably on this dataset size.
+- **BiLSTM showed high run-to-run variance** (R² ranging from -0.56 to 0.24 across different random seeds), suggesting it requires more training data or architectural tuning to converge reliably on this dataset size.
 - **Predicting % returns instead of absolute price levels was essential for tree models** — XGBoost/Random Forest cannot extrapolate beyond the price range seen during training, so training them on bounded return targets (and reconstructing price from the previous close) avoided a flat-line prediction failure mode.
 
 ---
