@@ -80,101 +80,116 @@ A few bugs were significant enough to be worth documenting, since finding and fi
 
 ## 🖥️ Live Dashboard
 
-The project includes a full Streamlit web application for interactive training, prediction, and visualization — no code required to use it.
-
-### Landing Page
-Clean upload interface — drop in your training and test Excel files, tune sequence length, epochs, and batch size from the sidebar.
-
-![App Landing](screenshots/00_general.png)
-
-### After Training
-Once training completes, KPI cards instantly surface the best-performing model per metric.
-
-![Trained Overview](screenshots/01_general.png)
+The project includes a full Streamlit web application for interactive training, prediction, and visualization — no code required to use it. Every chart-heavy section closes with a **💡 auto-generated insight callout** that highlights the key takeaway from that specific view, so you don't have to eyeball the numbers yourself.
 
 ---
 
 ## 📑 Dashboard Tabs
 
-### 1️⃣ Overview
+### 🏠 Landing
+
+**App Landing Page**
+
+Clean upload interface — drop in your training and test Excel files, and tune sequence length, epochs, and batch size from the sidebar.
+
+![Landing Page](screenshots/0_landingpg.png)
+
+**Post-Training Overview**
+
+Once training completes, KPI cards instantly surface the best-performing model per metric.
+
+![After Training](screenshots/1_after_train.png)
+
+---
+
+### 1️⃣ The Story
 
 **Actual vs Predicted — All Models**
-A single chart overlays every model's predictions against the real closing price, making it easy to visually compare tracking accuracy.
 
-![Actual vs Predicted](screenshots/02_overview.png)
+A single chart overlays every model's predictions against the real closing price, making it easy to visually compare tracking accuracy. Models can be toggled on or off directly from the chart's selector chips, so you can isolate one model or compare a handful side by side.
 
-**Regression Metrics Table**
-Full metrics table (RMSE, MAE, MAPE, R², EVS, DA) with the best value in each column automatically highlighted in green.
+![Actual vs Predicted](screenshots/2_story.png)
 
-![Regression Metrics](screenshots/03_overview.png)
+**Regression Metrics & Ensemble Weights**
 
-**Ensemble Weights**
-Shows exactly how much each model contributes to the final ensemble prediction, derived from inverse validation-MAE weighting.
+Metrics table (RMSE, MAE, MAPE, R², EVS, DA) with the best value per column highlighted, alongside the inverse-MAE ensemble weighting breakdown.
 
-![Ensemble Weights](screenshots/04_overview.png)
+![Metrics & Ensemble Weights](screenshots/3_story.png)
 
 ---
 
-### 2️⃣ Model Comparison
+### 2️⃣ Model Showdown
 
 **Metric Comparison — All Models**
+
 Six side-by-side bar charts (RMSE, MAE, MAPE, R², EVS, Directional Accuracy) for at-a-glance model ranking.
 
-![Metric Comparison](screenshots/05_model_comparison.png)
+![Metric Comparison](screenshots/4_modelshowdown.png)
 
 **Predicted vs Actual Scatter Plots**
+
 Each model gets its own scatter plot against the perfect-prediction diagonal, with R² annotated directly on the chart.
 
-![Scatter Plots](screenshots/06_model_comparison.png)
+![Scatter Plots](screenshots/5_modelshowdown.png)
 
 ---
 
-### 3️⃣ Diagnostics
+### 3️⃣ Under the Hood
 
 **Training & Validation Loss Curves**
+
 Tracks BiLSTM and GRU convergence epoch-by-epoch — useful for spotting overfitting or unstable training.
 
-![Loss Curves](screenshots/07_diagnostics.png)
+![Loss Curves](screenshots/6_underhood.png)
 
 **Residual Distributions**
+
 Histogram of prediction errors per model — a well-centered, narrow distribution around zero indicates a well-calibrated model.
 
-![Residual Distributions](screenshots/08_diagnostics.png)
+![Residual Distributions](screenshots/7_underhood.png)
 
 **Residual Scatter Plots**
+
 Residuals plotted against predicted values to check for heteroscedasticity or systematic bias.
 
-![Residual Scatter](screenshots/09_diagnostics.png)
+![Residual Scatter](screenshots/8_underhood.png)
 
 ---
 
-### 4️⃣ Features
+### 4️⃣ What Drives Predictions
 
 **Feature Correlation Heatmap**
-Full correlation matrix across all 11 engineered features — reveals which raw price columns are redundant (Open/High/Low/Close/Adj Close/Bollinger Bands are ~0.99 correlated).
 
-![Correlation Heatmap](screenshots/10_features.png)
+Full correlation matrix across engineered features — reveals which raw price columns are redundant (Open/High/Low/Close/Adj Close are ~0.99 correlated, Volume anti-correlated). Shown in two halves for readability.
+
+![Correlation Heatmap - 1](screenshots/9_driveprediction.png)
+![Correlation Heatmap - 2](screenshots/10_driveprediction.png)
 
 **XGBoost Feature Importance**
-Aggregated importance (summed across all 60 timesteps) showing RSI and Volume as the most predictive features.
 
-![XGBoost Feature Importance](screenshots/11_features.png)
+Aggregated importance showing which engineered features (RSI, Volume, MACD, etc.) most drive the return-based prediction.
+
+![XGBoost Feature Importance](screenshots/11_driveprediction.png)
 
 **SHAP Summary Plot**
-Top 20 most impactful (feature, lag) pairs with readable names like `RSI_t-6`, explaining individual prediction-level feature impact.
 
-![SHAP Summary](screenshots/12_features.png)
+Top impactful (feature, lag) pairs with readable names like `RSI_t-6`, explaining individual prediction-level feature impact. Shown in two halves for readability.
+
+![SHAP Summary - 1](screenshots/12_driveprediction.png)
+![SHAP Summary - 2](screenshots/13_driveprediction.png)
 
 **SHAP Aggregated Feature Importance**
-Mean absolute SHAP value per feature, aggregated across all lags — confirms RSI as the dominant predictor for return-based XGBoost targets.
 
-![SHAP Feature Importance](screenshots/13_features.png)
+Mean absolute SHAP value per feature, aggregated across all lags.
+
+![SHAP Feature Importance](screenshots/14_driveprediction.png)
 
 ---
 
 ## 🗂️ Project Structure
 
 ```
+
 Stock-Market-Prediction/
 ├── app.py                          # Streamlit web application
 ├── requirements.txt                # Python dependencies
@@ -187,20 +202,22 @@ Stock-Market-Prediction/
 │   ├── Trainset.xlsx              # Training data
 │   └── Testset.xlsx               # Test data
 └── screenshots/
-    ├── 00_general.png             # App landing page
-    ├── 01_general.png             # Post-training overview
-    ├── 02_overview.png            # Actual vs Predicted
-    ├── 03_overview.png            # Regression metrics table
-    ├── 04_overview.png            # Ensemble weights
-    ├── 05_model_comparison.png    # Metric comparison bars
-    ├── 06_model_comparison.png    # Scatter plots
-    ├── 07_diagnostics.png         # Loss curves
-    ├── 08_diagnostics.png         # Residual distributions
-    ├── 09_diagnostics.png         # Residual scatter plots
-    ├── 10_features.png            # Correlation heatmap
-    ├── 11_features.png            # XGBoost feature importance
-    ├── 12_features.png            # SHAP summary
-    └── 13_features.png            # SHAP feature importance
+    ├── 0_landingpg.png             # App landing page
+    ├── 1_after_train.png           # Post-training overview
+    ├── 2_story.png                 # Actual vs Predicted
+    ├── 3_story.png                 # Regression metrics & ensemble weights
+    ├── 4_modelshowdown.png         # Metric comparison bars
+    ├── 5_modelshowdown.png         # Scatter plots
+    ├── 6_underhood.png             # Loss curves
+    ├── 7_underhood.png             # Residual distributions
+    ├── 8_underhood.png             # Residual scatter plots
+    ├── 9_driveprediction.png       # Correlation heatmap (1/2)
+    ├── 10_driveprediction.png      # Correlation heatmap (2/2)
+    ├── 11_driveprediction.png      # XGBoost feature importance
+    ├── 12_driveprediction.png      # SHAP summary (1/2)
+    ├── 13_driveprediction.png      # SHAP summary (2/2)
+    └── 14_driveprediction.png      # SHAP feature importance
+
 ```
 
 ---
