@@ -80,87 +80,108 @@ A few bugs were significant enough to be worth documenting, since finding and fi
 
 ## 🖥️ Live Dashboard
 
-The project includes a full Streamlit web application for interactive training, prediction, and visualization — no code required to use it.
-
-### Landing Page
-Clean upload interface — drop in your training and test Excel files, tune sequence length, epochs, and batch size from the sidebar.
-
-![App Landing](screenshots/00_general.png)
-
-### After Training
-Once training completes, KPI cards instantly surface the best-performing model per metric.
-
-![Trained Overview](screenshots/01_general.png)
+The project includes a full Streamlit web application for interactive training, prediction, and visualization — no code required to use it. Every chart-heavy section closes with a **💡 auto-generated insight callout** that highlights the key takeaway from that specific view, so you don't have to eyeball the numbers yourself.
 
 ---
 
 ## 📑 Dashboard Tabs
 
 ### 🏠 Landing
+
 **App Landing Page**
-Initial state before data upload — model selector, upload panel, and training controls.
+
+Clean upload interface — drop in your training and test Excel files, and tune sequence length, epochs, and batch size from the sidebar.
+
 ![Landing Page](screenshots/0_landingpg.png)
 
 **Post-Training Overview**
-Dashboard state immediately after Train & Predict completes.
+
+Once training completes, KPI cards instantly surface the best-performing model per metric.
+
 ![After Training](screenshots/1_after_train.png)
 
 ---
 
 ### 1️⃣ The Story
+
 **Actual vs Predicted — All Models**
-A single chart overlays every model's predictions against the real closing price, making it easy to visually compare tracking accuracy.
+
+A single chart overlays every model's predictions against the real closing price, making it easy to visually compare tracking accuracy. Models can be toggled on or off directly from the chart's selector chips, so you can isolate one model or compare a handful side by side.
+
 ![Actual vs Predicted](screenshots/2_story.png)
 
 **Regression Metrics & Ensemble Weights**
+
 Metrics table (RMSE, MAE, MAPE, R², EVS, DA) with the best value per column highlighted, alongside the inverse-MAE ensemble weighting breakdown.
+
 ![Metrics & Ensemble Weights](screenshots/3_story.png)
 
 ---
 
 ### 2️⃣ Model Showdown
+
 **Metric Comparison — All Models**
+
 Six side-by-side bar charts (RMSE, MAE, MAPE, R², EVS, Directional Accuracy) for at-a-glance model ranking.
+
 ![Metric Comparison](screenshots/4_modelshowdown.png)
 
 **Predicted vs Actual Scatter Plots**
+
 Each model gets its own scatter plot against the perfect-prediction diagonal, with R² annotated directly on the chart.
+
 ![Scatter Plots](screenshots/5_modelshowdown.png)
 
 ---
 
 ### 3️⃣ Under the Hood
+
 **Training & Validation Loss Curves**
+
 Tracks BiLSTM and GRU convergence epoch-by-epoch — useful for spotting overfitting or unstable training.
+
 ![Loss Curves](screenshots/6_underhood.png)
 
 **Residual Distributions**
+
 Histogram of prediction errors per model — a well-centered, narrow distribution around zero indicates a well-calibrated model.
+
 ![Residual Distributions](screenshots/7_underhood.png)
 
 **Residual Scatter Plots**
+
 Residuals plotted against predicted values to check for heteroscedasticity or systematic bias.
+
 ![Residual Scatter](screenshots/8_underhood.png)
 
 ---
 
 ### 4️⃣ What Drives Predictions
+
 **Feature Correlation Heatmap**
+
 Full correlation matrix across engineered features — reveals which raw price columns are redundant (Open/High/Low/Close/Adj Close are ~0.99 correlated, Volume anti-correlated). Shown in two halves for readability.
+
 ![Correlation Heatmap - 1](screenshots/9_driveprediction.png)
 ![Correlation Heatmap - 2](screenshots/10_driveprediction.png)
 
 **XGBoost Feature Importance**
+
 Aggregated importance showing which engineered features (RSI, Volume, MACD, etc.) most drive the return-based prediction.
+
 ![XGBoost Feature Importance](screenshots/11_driveprediction.png)
 
 **SHAP Summary Plot**
+
 Top impactful (feature, lag) pairs with readable names like `RSI_t-6`, explaining individual prediction-level feature impact. Shown in two halves for readability.
+
 ![SHAP Summary - 1](screenshots/12_driveprediction.png)
 ![SHAP Summary - 2](screenshots/13_driveprediction.png)
 
 **SHAP Aggregated Feature Importance**
+
 Mean absolute SHAP value per feature, aggregated across all lags.
+
 ![SHAP Feature Importance](screenshots/14_driveprediction.png)
 
 ---
