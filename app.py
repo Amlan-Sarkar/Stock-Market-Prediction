@@ -1,83 +1,95 @@
-# ==========================================================
-# STOCK MARKET PREDICTION — STREAMLIT APP
-# Redesigned for narrative clarity, decision support & polish
-# ==========================================================
+# ======================================================================
+# STOCK PRICE PREDICTION — SERVING DASHBOARD
+# ----------------------------------------------------------------------
 
 import warnings
-warnings.filterwarnings('ignore')
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=UserWarning)
 
-import streamlit as st
+import os
+os.environ["TF_DETERMINISTIC_OPS"] = "1"
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+
+import json
+import traceback
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
+
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import matplotlib as mpl
 import seaborn as sns
-import shap
+
+import streamlit as st
 
 from sklearn.preprocessing import MinMaxScaler
-from sklearn.metrics import (
-    mean_squared_error, mean_absolute_error,
-    r2_score, explained_variance_score
-)
-import xgboost as xgb
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import RandomForestRegressor
-
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import (
-    Dense, Dropout, LSTM, Bidirectional, GRU
+from sklearn.metrics import (
+    mean_squared_error, mean_absolute_error, r2_score, explained_variance_score
 )
-from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
+
+import joblib
+import xgboost as xgb
+
+import tensorflow as tf
+from tensorflow.keras.models import Sequential, load_model
+from tensorflow.keras.layers import Dense, Dropout, LSTM, Bidirectional, GRU
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
+
+import shap
 
 np.random.seed(42)
+tf.random.set_seed(42)
 
-# ==========================================================
+# ======================================================================
+# PATHS
+# ======================================================================
+BASE_DIR   = Path(__file__).resolve().parent
+DATA_DIR   = BASE_DIR / "data"
+MODELS_DIR = BASE_DIR / "models"
+DEFAULT_TRAIN_PATH = DATA_DIR / "Trainset.xlsx"
+DEFAULT_TEST_PATH  = DATA_DIR / "Testset.xlsx"
+
+# ======================================================================
 # PAGE CONFIG
-# ==========================================================
+# ======================================================================
 st.set_page_config(
-    page_title="Stock Market Prediction",
+    page_title="Stock Price Prediction",
     page_icon="📈",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
-# ==========================================================
-# GLOBAL STYLE
-# ==========================================================
-mpl.rcParams.update({
-    'font.family':      'DejaVu Sans',
-    'axes.edgecolor':   '#D1D5DB',
-    'axes.labelcolor':  '#374151',
-    'axes.titlecolor':  '#111827',
-    'xtick.color':      '#6B7280',
-    'ytick.color':      '#6B7280',
-    'axes.grid':        False,
-    'figure.facecolor': 'white',
-    'axes.facecolor':   'white',
+matplotlib.rcParams.update({
+    "font.family":      "DejaVu Sans",
+    "axes.edgecolor":   "#D1D5DB",
+    "axes.labelcolor":  "#374151",
+    "axes.titlecolor":  "#111827",
+    "xtick.color":      "#6B7280",
+    "ytick.color":      "#6B7280",
+    "axes.grid":        False,
+    "figure.facecolor": "white",
+    "axes.facecolor":   "white",
 })
 
 CUSTOM_CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+html, body, [class*="css"] { font-family: 'Inter', -apple-system, sans-serif; }
 
-html, body, [class*="css"]  { font-family: 'Inter', -apple-system, sans-serif; }
-
-/* Hero */
-.hero-title { font-size: 2.3rem; font-weight: 800; letter-spacing: -0.02em;
+.hero-title { font-size: 2.2rem; font-weight: 800; letter-spacing: -0.02em;
               margin-bottom: 0.1rem; color: #111827; }
-.hero-sub   { color: #6B7280; font-size: 1.05rem; margin-bottom: 0.4rem; }
-.hero-tag   { display:inline-block; background:#EEF2FF; color:#4338CA;
-              padding:3px 10px; border-radius:20px; font-size:0.78rem;
-              font-weight:600; margin-right:6px; margin-bottom: 4px;}
+.hero-sub   { color: #6B7280; font-size: 1.02rem; margin-bottom: 0.5rem; }
 
-/* Section labels */
 .section-eyebrow { text-transform: uppercase; letter-spacing: 0.08em;
                     font-size: 0.72rem; font-weight: 700; color: #9CA3AF;
                     margin-bottom: 2px; }
-.section-title   { font-size: 1.35rem; font-weight: 700; color: #111827;
-                    margin-bottom: 4px; margin-top: 0px;}
+.section-title   { font-size: 1.3rem; font-weight: 700; color: #111827;
+                    margin-bottom: 6px; margin-top: 0px; }
 
-/* Callout boxes */
 .insight-box, .warning-box, .verdict-box {
     padding: 14px 18px; border-radius: 8px; margin: 10px 0 22px 0;
     font-size: 0.94rem; line-height: 1.55; color: #1F2937;
@@ -87,1036 +99,1107 @@ html, body, [class*="css"]  { font-family: 'Inter', -apple-system, sans-serif; }
 .verdict-box  { background: #F0FDF4; border-left: 4px solid #16A34A; }
 .insight-box b, .warning-box b, .verdict-box b { color: #111827; }
 
-/* Decision cards */
 .decision-grid { display: flex; gap: 14px; margin: 10px 0 24px 0; flex-wrap: wrap; }
 .decision-card { flex: 1; min-width: 220px; background: white;
-                  border: 1px solid #E5E7EB; border-radius: 10px;
-                  padding: 16px 18px; }
+                  border: 1px solid #E5E7EB; border-radius: 10px; padding: 16px 18px; }
 .decision-card .dc-label { font-size: 0.72rem; font-weight: 700; color: #9CA3AF;
                              text-transform: uppercase; letter-spacing: 0.06em; }
-.decision-card .dc-model { font-size: 1.15rem; font-weight: 800; color: #111827;
+.decision-card .dc-model { font-size: 1.1rem; font-weight: 800; color: #111827;
                              margin: 4px 0 6px 0; }
-.decision-card .dc-why   { font-size: 0.86rem; color: #4B5563; line-height: 1.4; }
+.decision-card .dc-why   { font-size: 0.85rem; color: #4B5563; line-height: 1.4; }
 
-/* Model pill legend */
 .pill { display:inline-block; padding: 2px 10px; border-radius: 20px;
-        font-size: 0.78rem; font-weight: 600; color: white; margin-right: 6px; }
+        font-size: 0.76rem; font-weight: 600; color: white; margin-right: 6px; }
 </style>
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
-# ==========================================================
-# CONSTANTS
-# ==========================================================
+# ======================================================================
+# CONSTANTS — mirrored exactly from STMP.ipynb
+# ======================================================================
+REQUIRED_COLUMNS = ["Open", "High", "Low", "Close", "Adj Close", "Volume"]
+
 FEATURES = [
-    'Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume',
-    'RSI', 'MACD', 'MACD_Signal', 'BB_Upper', 'BB_Lower'
+    "Open_ret", "High_ret", "Low_ret", "Close_ret",
+    "Volume_log", "RSI", "MACD_norm", "MACD_Signal_norm", "BB_PctB",
 ]
-NN_FEATURES  = ['Close', 'Volume', 'RSI', 'MACD', 'MACD_Signal']
-TARGET_COL   = FEATURES.index('Close')
-N_FEAT       = len(FEATURES)
-N_FEAT_NN    = len(NN_FEATURES)
+TARGET_COL  = FEATURES.index("Close_ret")
+SEQ_LEN     = 60
+N_FEAT      = len(FEATURES)
+
+NN_FEATURES = ["Close_ret", "Volume_log", "RSI", "MACD_norm", "MACD_Signal_norm"]
+NN_INDICES  = [FEATURES.index(f) for f in NN_FEATURES]
+N_FEAT_NN   = len(NN_FEATURES)
+
+TRAIN_VAL_SPLIT = 0.8
+
+MODEL_FILES = {
+    "BiLSTM":            "best_bilstm.keras",
+    "GRU":               "best_gru.keras",
+    "XGBoost":           "best_xgb.json",
+    "Linear Regression": "model_linear_regression.pkl",
+    "Random Forest":     "model_random_forest.pkl",
+}
+HISTORY_FILES = {"BiLSTM": "history_bilstm.json", "GRU": "history_gru.json"}
+
+BASE_MODEL_ORDER = ["BiLSTM", "GRU", "XGBoost", "Linear Regression", "Random Forest"]
+ALL_MODEL_ORDER  = BASE_MODEL_ORDER + ["Ensemble"]
 
 MODEL_COLORS = {
-    'BiLSTM':            '#4472C4',
-    'GRU':               '#2E9E5B',
-    'XGBoost':           '#C0392B',
-    'Linear Regression': '#7D3C98',
-    'Random Forest':     '#784212',
-    'Ensemble':          '#B7950B'
+    "BiLSTM":            "#4472C4",
+    "GRU":               "#2E9E5B",
+    "XGBoost":           "#C0392B",
+    "Linear Regression": "#7D3C98",
+    "Random Forest":     "#784212",
+    "Ensemble":          "#B7950B",
 }
-
 MODEL_TAGLINE = {
-    'BiLSTM':            'Deep sequence learner',
-    'GRU':                'Lightweight recurrent net',
-    'XGBoost':            'Gradient-boosted trees',
-    'Linear Regression':  'Baseline linear model',
-    'Random Forest':      'Bagged decision trees',
-    'Ensemble':            'MAE-weighted blend'
+    "BiLSTM":            "3-layer bidirectional LSTM (64 units/direction)",
+    "GRU":               "3-layer GRU (64 units)",
+    "XGBoost":           "Gradient-boosted trees (1,000 rounds, early-stopped)",
+    "Linear Regression": "Ordinary least squares baseline",
+    "Random Forest":     "Bagged decision trees (200 trees)",
+    "Ensemble":          "Inverse-validation-MAE weighted blend of the five models",
 }
+METRIC_LABELS = {
+    "RMSE": "RMSE  (lower is better)",
+    "MAE":  "MAE  (lower is better)",
+    "MAPE": "MAPE %  (lower is better)",
+    "R2":   "R²  (higher is better)",
+    "EVS":  "Explained Variance  (higher is better)",
+    "DA":   "Directional Accuracy %  (higher is better)",
+}
+LOWER_IS_BETTER = {"RMSE", "MAE", "MAPE"}
 
-# ==========================================================
-# HELPER FUNCTIONS — ML PIPELINE (unchanged logic)
-# ==========================================================
-def add_indicators(df):
-    delta    = df['Close'].diff()
+# ======================================================================
+# SMALL UI HELPERS
+# ======================================================================
+def insight(text):
+    st.markdown(f'<div class="insight-box">💡 <b>Insight —</b> {text}</div>', unsafe_allow_html=True)
+
+def caveat(text):
+    st.markdown(f'<div class="warning-box">⚠️ <b>Caveat —</b> {text}</div>', unsafe_allow_html=True)
+
+def verdict(text):
+    st.markdown(f'<div class="verdict-box">✅ <b>Bottom line —</b> {text}</div>', unsafe_allow_html=True)
+
+def eyebrow_title(eyebrow, title):
+    st.markdown(
+        f'<div class="section-eyebrow">{eyebrow}</div><div class="section-title">{title}</div>',
+        unsafe_allow_html=True,
+    )
+
+def model_pill(name):
+    return f'<span class="pill" style="background:{MODEL_COLORS[name]}">{name}</span>'
+
+def models_at_extreme(metrics, key, want="min"):
+    """Return every model name tied for the best value of `key` (handles ties honestly)."""
+    values = {n: m[key] for n, m in metrics.items()}
+    target = min(values.values()) if want == "min" else max(values.values())
+    return [n for n, v in values.items() if np.isclose(v, target)]
+
+# ======================================================================
+# PIPELINE FUNCTIONS — mirrored line-for-line from STMP.ipynb
+# ======================================================================
+def validate_required_columns(df: pd.DataFrame, label: str):
+    missing = [c for c in REQUIRED_COLUMNS if c not in df.columns]
+    if missing:
+        raise ValueError(f"**{label}** is missing required column(s): {missing}")
+
+def chronology_warning(combined: pd.DataFrame):
+    """Returns a warning string if date ordering can't be verified/confirmed, else None."""
+    if "Date" not in combined.columns:
+        return ("No 'Date' column found in the data — chronological ordering of "
+                "train → test is assumed, not verified.")
+    dates = pd.to_datetime(combined["Date"])
+    if not dates.is_monotonic_increasing:
+        return ("Dates are not sorted ascending — the indicator/lookback logic assumes "
+                "the training set is immediately followed by the test set in time.")
+    return None
+
+@st.cache_data(show_spinner=False)
+def engineer_features(train_data: pd.DataFrame, test_data: pd.DataFrame):
+    """Cell #2 TECHNICAL INDICATORS — RSI, MACD, Bollinger Bands, then the
+    stationary return/log/normalized transforms that are the actual model
+    features. Returns the same train/test split shape, minus warm-up rows."""
+    train_len    = len(train_data)
+    combined_len = train_len + len(test_data)
+    combined = pd.concat([train_data, test_data], axis=0).reset_index(drop=True)
+
+    chron_warning = chronology_warning(combined)
+
+    delta    = combined["Close"].diff()
     gain     = delta.where(delta > 0, 0)
     loss     = -delta.where(delta < 0, 0)
     avg_gain = gain.rolling(14).mean()
     avg_loss = loss.rolling(14).mean()
-    rs       = avg_gain / avg_loss
-    df['RSI'] = 100 - (100 / (1 + rs))
+    rs       = avg_gain / avg_loss.replace(0, 1e-10)
+    combined["RSI"] = 100 - (100 / (1 + rs))
 
-    ema12 = df['Close'].ewm(span=12, adjust=False).mean()
-    ema26 = df['Close'].ewm(span=26, adjust=False).mean()
-    df['MACD']        = ema12 - ema26
-    df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
+    ema12 = combined["Close"].ewm(span=12, adjust=False).mean()
+    ema26 = combined["Close"].ewm(span=26, adjust=False).mean()
+    combined["MACD"]        = ema12 - ema26
+    combined["MACD_Signal"] = combined["MACD"].ewm(span=9, adjust=False).mean()
 
-    rm = df['Close'].rolling(20).mean()
-    rs = df['Close'].rolling(20).std()
-    df['BB_Upper'] = rm + 2 * rs
-    df['BB_Lower'] = rm - 2 * rs
-    return df
+    rolling_mean = combined["Close"].rolling(20).mean()
+    rolling_std  = combined["Close"].rolling(20).std()
+    combined["BB_Upper"] = rolling_mean + 2 * rolling_std
+    combined["BB_Lower"] = rolling_mean - 2 * rolling_std
 
+    prev_close = combined["Close"].shift(1)
+    combined["Open_ret"]  = (combined["Open"]  - prev_close) / prev_close
+    combined["High_ret"]  = (combined["High"]  - prev_close) / prev_close
+    combined["Low_ret"]   = (combined["Low"]   - prev_close) / prev_close
+    combined["Close_ret"] = (combined["Close"] - prev_close) / prev_close
+    combined["Volume_log"] = np.log1p(combined["Volume"])
+    combined["MACD_norm"]        = combined["MACD"] / combined["Close"]
+    combined["MACD_Signal_norm"] = combined["MACD_Signal"] / combined["Close"]
 
-def build_sequences(data, seq_len):
+    bb_width = (combined["BB_Upper"] - combined["BB_Lower"]).replace(0, 1e-10)
+    combined["BB_PctB"] = (combined["Close"] - combined["BB_Lower"]) / bb_width
+
+    combined.dropna(inplace=True)
+    combined.reset_index(drop=True, inplace=True)
+
+    rows_dropped  = combined_len - len(combined)
+    new_train_len = train_len - rows_dropped
+    if new_train_len <= SEQ_LEN + 10:
+        raise ValueError(
+            "After dropping indicator warm-up rows, too little training data remains "
+            f"({new_train_len} rows) to build {SEQ_LEN}-day sequences. Provide a longer "
+            "training series."
+        )
+
+    train_out = combined.iloc[:new_train_len].reset_index(drop=True)
+    test_out  = combined.iloc[new_train_len:].reset_index(drop=True)
+    return train_out, test_out, rows_dropped, chron_warning
+
+def split_train_val(train_data: pd.DataFrame):
+    split_idx = int(TRAIN_VAL_SPLIT * len(train_data))
+    train_df = train_data.iloc[:split_idx].reset_index(drop=True)
+    val_df   = train_data.iloc[split_idx:].reset_index(drop=True)
+    return train_df, val_df
+
+def build_sequences(data: np.ndarray, seq_len: int):
     X, y = [], []
     for i in range(seq_len, len(data)):
         X.append(data[i - seq_len:i])
         y.append(data[i, TARGET_COL])
     return np.array(X), np.array(y)
 
+def build_raw_targets(series, seq_len):
+    return np.asarray(series)[seq_len:]
 
-def build_return_targets(raw_close, seq_len):
-    returns = []
-    for i in range(seq_len, len(raw_close)):
-        prev = raw_close[i - 1]
-        curr = raw_close[i]
-        returns.append((curr - prev) / prev)
-    return np.array(returns)
-
-
-def inverse_price(scaled_preds, scaler):
+def inverse_return(scaled_preds, scaler):
     dummy = np.zeros((len(scaled_preds), N_FEAT))
     dummy[:, TARGET_COL] = scaled_preds
     return scaler.inverse_transform(dummy)[:, TARGET_COL]
 
-
-def predict_prices(model, X, scaler, flatten=True, is_keras=True):
-    if is_keras:
-        raw = model.predict(X, verbose=0)
-    else:
-        raw = model.predict(X)
-    if flatten:
-        raw = raw.flatten()
-    return inverse_price(raw, scaler)
-
+def predict_returns(model, X, scaler):
+    raw = model.predict(X, verbose=0).flatten()
+    return inverse_return(raw, scaler)
 
 def reconstruct_from_returns(pred_returns, prev_closes):
     return prev_closes * (1 + pred_returns)
 
-
 def directional_accuracy(real, pred):
     real_dir = np.diff(real) > 0
     pred_dir = np.diff(pred) > 0
-    return np.mean(real_dir == pred_dir) * 100
+    return float(np.mean(real_dir == pred_dir) * 100)
 
+def compute_regression_metrics(real, pred):
+    rmse = float(np.sqrt(mean_squared_error(real, pred)))
+    mae  = float(mean_absolute_error(real, pred))
+    mape = float(np.mean(np.abs((real - pred) / np.where(real != 0, real, np.nan))) * 100)
+    r2   = float(r2_score(real, pred))
+    evs  = float(explained_variance_score(real, pred))
+    da   = directional_accuracy(real, pred)
+    return dict(RMSE=rmse, MAE=mae, MAPE=mape, R2=r2, EVS=evs, DA=da)
 
-def get_early_stop():
-    return EarlyStopping(
-        monitor='val_loss', patience=20,
-        restore_best_weights=True, verbose=0
+def build_all_sequences(train_df, val_df, train_data, test_data, scaler):
+    """Reproduces notebook cells #6-#9 and #14: normalization + sequence
+    construction for train / validation / test, all from one fitted scaler."""
+    train_scaled = scaler.transform(train_df[FEATURES].values)
+    X_train, y_train = build_sequences(train_scaled, SEQ_LEN)
+    X_train_nn  = X_train[:, :, NN_INDICES]
+    y_train_ret = build_raw_targets(train_df["Close_ret"].values, SEQ_LEN)
+    X_train_flat = X_train.reshape(len(X_train), -1)
+
+    val_inputs = pd.concat(
+        (train_df[FEATURES].tail(SEQ_LEN), val_df[FEATURES]), axis=0
+    ).reset_index(drop=True)
+    val_scaled_full = scaler.transform(val_inputs.values)
+    X_val, y_val = build_sequences(val_scaled_full, SEQ_LEN)
+    X_val_nn  = X_val[:, :, NN_INDICES]
+    y_val_ret = build_raw_targets(val_inputs["Close_ret"].values, SEQ_LEN)
+    X_val_flat = X_val.reshape(len(X_val), -1)
+
+    dataset_total = pd.concat(
+        (train_data[FEATURES], test_data[FEATURES]), axis=0
+    ).reset_index(drop=True)
+    inputs = dataset_total[len(dataset_total) - len(test_data) - SEQ_LEN:].values
+    inputs = scaler.transform(inputs)
+    X_test, _ = build_sequences(inputs, SEQ_LEN)
+    X_test_flat = X_test.reshape(len(X_test), -1)
+    X_test_nn   = X_test[:, :, NN_INDICES]
+    real_close  = test_data["Close"].values
+
+    if len(X_test) != len(real_close):
+        raise ValueError(
+            f"Length mismatch: X_test has {len(X_test)} rows but real_close has "
+            f"{len(real_close)} rows. Check test data alignment after indicator computation."
+        )
+
+    prev_closes_test = np.concatenate([[train_data["Close"].values[-1]], test_data["Close"].values[:-1]])
+    prev_closes_val  = np.concatenate([[train_df["Close"].values[-1]], val_df["Close"].values[:-1]])
+    val_real = val_df["Close"].values
+
+    return dict(
+        X_train=X_train, y_train=y_train, X_train_nn=X_train_nn,
+        y_train_ret=y_train_ret, X_train_flat=X_train_flat,
+        X_val=X_val, y_val=y_val, X_val_nn=X_val_nn,
+        y_val_ret=y_val_ret, X_val_flat=X_val_flat,
+        X_test=X_test, X_test_flat=X_test_flat, X_test_nn=X_test_nn,
+        real_close=real_close, prev_closes_test=prev_closes_test,
+        prev_closes_val=prev_closes_val, val_real=val_real,
     )
 
+# ======================================================================
+# DATA LOADING
+# ======================================================================
+@st.cache_data(show_spinner="Reading Excel file…")
+def read_excel_cached(source, cache_tag):
+    return pd.read_excel(source)
 
-def get_reduce_lr():
-    return ReduceLROnPlateau(
-        monitor='val_loss', factor=0.5,
-        patience=10, min_lr=1e-6, verbose=0
+def resolve_data_source():
+    """Returns (train_raw, test_raw, source_label) or (None, None, None)."""
+    with st.sidebar:
+        st.markdown("### 📁 Data")
+        bundled_available = DEFAULT_TRAIN_PATH.exists() and DEFAULT_TEST_PATH.exists()
+        options = ["Use bundled dataset (data/)"] if bundled_available else []
+        options.append("Upload my own Excel files")
+        default_index = 0
+        choice = st.radio("Source", options, index=default_index, label_visibility="collapsed")
+
+        if choice == "Use bundled dataset (data/)":
+            st.caption(f"`{DEFAULT_TRAIN_PATH.name}` + `{DEFAULT_TEST_PATH.name}` from `data/`")
+            train_raw = read_excel_cached(str(DEFAULT_TRAIN_PATH), DEFAULT_TRAIN_PATH.stat().st_mtime)
+            test_raw  = read_excel_cached(str(DEFAULT_TEST_PATH), DEFAULT_TEST_PATH.stat().st_mtime)
+            return train_raw, test_raw, "bundled"
+        else:
+            train_file = st.file_uploader("Training set (.xlsx)", type=["xlsx"], key="train_upload")
+            test_file  = st.file_uploader("Test set (.xlsx)", type=["xlsx"], key="test_upload")
+            if train_file is None or test_file is None:
+                st.caption("Upload both files to continue.")
+                return None, None, None
+            train_raw = read_excel_cached(train_file, train_file.name + str(train_file.size))
+            test_raw  = read_excel_cached(test_file, test_file.name + str(test_file.size))
+            return train_raw, test_raw, "custom"
+
+# ======================================================================
+# MODEL ARCHITECTURES — identical hyperparameters to STMP.ipynb
+# ======================================================================
+def build_bilstm():
+    model = Sequential([
+        Bidirectional(LSTM(64, return_sequences=True), input_shape=(SEQ_LEN, N_FEAT_NN)),
+        Dropout(0.2),
+        Bidirectional(LSTM(64, return_sequences=True)),
+        Dropout(0.2),
+        Bidirectional(LSTM(64)),
+        Dropout(0.2),
+        Dense(1),
+    ], name="BiLSTM")
+    model.compile(optimizer="adam", loss="mse")
+    return model
+
+def build_gru():
+    model = Sequential([
+        GRU(64, return_sequences=True, input_shape=(SEQ_LEN, N_FEAT_NN)),
+        Dropout(0.2),
+        GRU(64, return_sequences=True),
+        Dropout(0.2),
+        GRU(64),
+        Dropout(0.2),
+        Dense(1),
+    ], name="GRU")
+    model.compile(optimizer="adam", loss="mse")
+    return model
+
+def build_xgb_model():
+    return xgb.XGBRegressor(
+        n_estimators=1000, learning_rate=0.01, max_depth=8,
+        subsample=0.8, colsample_bytree=0.8, random_state=42,
+        reg_alpha=0.1, reg_lambda=1, verbosity=0, early_stopping_rounds=20,
     )
 
-# ==========================================================
-# HELPER FUNCTIONS — NARRATIVE / UI
-# ==========================================================
-def insight(text):
-    st.markdown(f'<div class="insight-box">💡 <b>Insight —</b> {text}</div>',
-                unsafe_allow_html=True)
-
-def caveat(text):
-    st.markdown(f'<div class="warning-box">⚠️ <b>Caveat —</b> {text}</div>',
-                unsafe_allow_html=True)
-
-def verdict(text):
-    st.markdown(f'<div class="verdict-box">✅ <b>Bottom line —</b> {text}</div>',
-                unsafe_allow_html=True)
-
-def eyebrow_title(eyebrow, title):
-    st.markdown(f'<div class="section-eyebrow">{eyebrow}</div>'
-                f'<div class="section-title">{title}</div>',
-                unsafe_allow_html=True)
-
-def model_pill(name):
-    color = MODEL_COLORS[name]
-    return f'<span class="pill" style="background:{color}">{name}</span>'
-
-# ==========================================================
-# SIDEBAR
-# ==========================================================
-with st.sidebar:
-    st.markdown("## 📈 Stock Prediction")
-    st.caption("Six models. One question: can price be predicted?")
-    st.divider()
-
-    st.markdown("### 📁 Upload Data")
-    train_file = st.file_uploader("Training Set (.xlsx)", type=['xlsx'])
-    test_file  = st.file_uploader("Test Set (.xlsx)",     type=['xlsx'])
-
-    st.divider()
-    st.markdown("### ⚙️ Settings")
-    SEQ_LEN    = st.slider("Sequence Length (days)", 30, 90, 60, step=5)
-    MAX_EPOCHS = st.slider("Max Epochs", 50, 200, 100, step=10)
-    BATCH_SIZE = st.select_slider("Batch Size", options=[16, 32, 64], value=32)
-
-    st.divider()
-    can_run  = train_file is not None and test_file is not None
-    run_btn  = st.button(
-        "🚀 Train & Predict",
-        type="primary",
-        use_container_width=True,
-        disabled=not can_run
+def build_rf_model():
+    return RandomForestRegressor(
+        n_estimators=200, max_depth=12, max_features="sqrt",
+        min_samples_split=5, min_samples_leaf=2, random_state=42, n_jobs=-1, verbose=0,
     )
-    if not can_run:
-        st.caption("Upload both files to enable training.")
 
-    st.divider()
-    with st.expander("ℹ️ About this project"):
-        st.markdown(
-            "This dashboard compares **six modeling approaches** — two "
-            "deep sequence models, two tree ensembles, one linear "
-            "baseline, and a weighted blend — on the same stock price "
-            "series, using the same engineered features.\n\n"
-            "The goal isn't to \"beat the market.\" It's to honestly "
-            "measure **how much of next-day price movement is learnable "
-            "at all**, and to show which modeling family is best suited "
-            "to which job — tracking price levels vs. calling direction."
+# ======================================================================
+# MODEL LOADING (cached; `version` busts the cache after retraining)
+# ======================================================================
+def _load_one_model(name, path):
+    try:
+        if name in ("BiLSTM", "GRU"):
+            return load_model(path), None
+        elif name == "XGBoost":
+            m = xgb.XGBRegressor()
+            m.load_model(str(path))
+            return m, None
+        else:
+            return joblib.load(path), None
+    except Exception as e:  # noqa: BLE001 - surfaced to the UI, not swallowed
+        return None, str(e)
+
+@st.cache_resource(show_spinner="Loading trained models…")
+def load_models(models_dir_str, version):
+    models_dir = Path(models_dir_str)
+    models, errors = {}, {}
+    for name, fname in MODEL_FILES.items():
+        path = models_dir / fname
+        if not path.exists():
+            errors[name] = "not found"
+            continue
+        model, err = _load_one_model(name, path)
+        if model is not None:
+            models[name] = model
+        else:
+            errors[name] = err
+    return models, errors
+
+def load_histories(models_dir: Path):
+    histories = {}
+    for name, fname in HISTORY_FILES.items():
+        path = models_dir / fname
+        if path.exists():
+            try:
+                with open(path) as f:
+                    histories[name] = json.load(f)
+            except Exception:
+                pass
+    return histories
+
+# ======================================================================
+# LIVE TRAINING (on-demand — mirrors notebook cells #9-#13 exactly)
+# ======================================================================
+class StreamlitEpochProgress(tf.keras.callbacks.Callback):
+    """Updates existing placeholders in place — does not trigger reruns."""
+    def __init__(self, text_ph, bar_ph, total_epochs, label):
+        super().__init__()
+        self.text_ph, self.bar_ph = text_ph, bar_ph
+        self.total_epochs, self.label = total_epochs, label
+
+    def on_epoch_end(self, epoch, logs=None):
+        logs = logs or {}
+        frac = min((epoch + 1) / self.total_epochs, 1.0)
+        self.bar_ph.progress(frac)
+        self.text_ph.markdown(
+            f"`{self.label}` epoch **{epoch + 1}/{self.total_epochs}** — "
+            f"loss `{logs.get('loss', float('nan')):.5f}` · "
+            f"val_loss `{logs.get('val_loss', float('nan')):.5f}`"
         )
 
-# ==========================================================
-# HEADER / HERO
-# ==========================================================
-st.markdown('<div class="hero-title">📈 Stock Market Price Prediction</div>',
-            unsafe_allow_html=True)
-st.markdown(
-    '<div class="hero-sub">Six models, one dataset — a controlled test of '
-    'what\'s actually predictable in price data.</div>',
-    unsafe_allow_html=True
-)
-st.markdown(
-    ''.join(model_pill(n) for n in MODEL_COLORS) + '&nbsp;',
-    unsafe_allow_html=True
-)
-st.write("")
-st.divider()
+def train_all_models(seq, models_dir: Path):
+    """Trains BiLSTM, GRU, XGBoost, Linear Regression, and Random Forest with
+    the exact architectures/hyperparameters/callbacks used in STMP.ipynb, and
+    persists them (plus BiLSTM/GRU loss history, which the notebook doesn't
+    normally persist) so the Diagnostics tab has real loss curves next time."""
+    models_dir.mkdir(parents=True, exist_ok=True)
+    trained, histories = {}, {}
+    overall = st.progress(0.0, text="Starting training pipeline…")
 
-# ==========================================================
-# EMPTY STATE — STORY-FIRST LANDING
-# ==========================================================
-if 'results' not in st.session_state and not run_btn:
-    eyebrow_title("THE QUESTION", "Can six different modeling families predict a stock's next move?")
-    st.markdown(
-        "Most stock prediction demos show one model and call it a day. "
-        "This one runs **five architecturally different approaches** — "
-        "two recurrent neural nets, two tree ensembles, and a linear "
-        "baseline — on identical data, then blends them into a weighted "
-        "ensemble. The comparison itself is the point: it reveals which "
-        "kind of signal each model family is actually good at extracting."
+    # ---- BiLSTM ----
+    st.markdown("**Step 1 / 5 — Bidirectional LSTM** (up to 100 epochs, early-stopped)")
+    text_ph, bar_ph = st.empty(), st.progress(0.0)
+    model_bilstm = build_bilstm()
+    hist = model_bilstm.fit(
+        seq["X_train_nn"], seq["y_train"], epochs=100, batch_size=32,
+        validation_data=(seq["X_val_nn"], seq["y_val"]),
+        callbacks=[
+            EarlyStopping(monitor="val_loss", patience=20, restore_best_weights=True, verbose=0),
+            ModelCheckpoint(str(models_dir / "best_bilstm.keras"), monitor="val_loss", save_best_only=True, verbose=0),
+            ReduceLROnPlateau(monitor="val_loss", factor=0.5, patience=10, min_lr=1e-6, verbose=0),
+            StreamlitEpochProgress(text_ph, bar_ph, 100, "BiLSTM"),
+        ],
+        verbose=0,
     )
-    st.write("")
+    trained["BiLSTM"] = model_bilstm
+    histories["BiLSTM"] = {"loss": hist.history["loss"], "val_loss": hist.history["val_loss"]}
+    overall.progress(0.2, text="BiLSTM done — training GRU…")
 
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.markdown("**🧠 Step 1 — Engineer the signal**")
-        st.caption(
-            "RSI, MACD, and Bollinger Bands are computed from raw OHLCV "
-            "data to give models momentum and volatility context beyond "
-            "price alone."
-        )
-    with c2:
-        st.markdown("**⚔️ Step 2 — Run a fair fight**")
-        st.caption(
-            "BiLSTM, GRU, XGBoost, Random Forest, and Linear Regression "
-            "train on the same split, same horizon, same target — so "
-            "differences reflect the model, not the setup."
-        )
-    with c3:
-        st.markdown("**🔎 Step 3 — Interrogate the result**")
-        st.caption(
-            "Six metrics, residual diagnostics, and SHAP values decide "
-            "which model wins — and whether any of them beat a coin flip "
-            "on direction."
-        )
-
-    st.divider()
-    st.info(
-        "👆 Upload your training and test Excel files in the sidebar, "
-        "then click **Train & Predict** to begin."
+    # ---- GRU ----
+    st.markdown("**Step 2 / 5 — GRU** (up to 100 epochs, early-stopped)")
+    text_ph, bar_ph = st.empty(), st.progress(0.0)
+    model_gru = build_gru()
+    hist = model_gru.fit(
+        seq["X_train_nn"], seq["y_train"], epochs=100, batch_size=32,
+        validation_data=(seq["X_val_nn"], seq["y_val"]),
+        callbacks=[
+            EarlyStopping(monitor="val_loss", patience=20, restore_best_weights=True, verbose=0),
+            ModelCheckpoint(str(models_dir / "best_gru.keras"), monitor="val_loss", save_best_only=True, verbose=0),
+            ReduceLROnPlateau(monitor="val_loss", factor=0.5, patience=10, min_lr=1e-6, verbose=0),
+            StreamlitEpochProgress(text_ph, bar_ph, 100, "GRU"),
+        ],
+        verbose=0,
     )
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Models", "6",  "BiLSTM · GRU · XGBoost · LR · RF · Ensemble")
-    c2.metric("Metrics", "6", "RMSE · MAE · MAPE · R² · EVS · DA")
-    c3.metric("Visualizations", "10+", "Charts · Heatmaps · SHAP · Scatter")
+    trained["GRU"] = model_gru
+    histories["GRU"] = {"loss": hist.history["loss"], "val_loss": hist.history["val_loss"]}
+    overall.progress(0.4, text="GRU done — training XGBoost…")
 
-# ==========================================================
-# TRAINING PIPELINE (logic unchanged from original build)
-# ==========================================================
-if run_btn:
-    nn_indices = [FEATURES.index(f) for f in NN_FEATURES]
+    # ---- XGBoost ----
+    st.markdown("**Step 3 / 5 — XGBoost** (1,000 rounds, early-stopped)")
+    model_xgb = build_xgb_model()
+    model_xgb.fit(
+        seq["X_train_flat"], seq["y_train_ret"],
+        eval_set=[(seq["X_val_flat"], seq["y_val_ret"])], verbose=False,
+    )
+    model_xgb.save_model(str(models_dir / "best_xgb.json"))
+    trained["XGBoost"] = model_xgb
+    overall.progress(0.7, text="XGBoost done — fitting Linear Regression…")
 
-    with st.status("Running pipeline…", expanded=True) as status:
+    # ---- Linear Regression ----
+    st.markdown("**Step 4 / 5 — Linear Regression**")
+    model_lr = LinearRegression()
+    model_lr.fit(seq["X_train_flat"], seq["y_train_ret"])
+    joblib.dump(model_lr, models_dir / "model_linear_regression.pkl")
+    trained["Linear Regression"] = model_lr
+    overall.progress(0.85, text="Linear Regression done — training Random Forest…")
 
-        # ── LOAD ────────────────────────────────────────────
-        st.write("📂 Loading data…")
-        train_data = pd.read_excel(train_file)
-        test_data  = pd.read_excel(test_file)
-        st.write(
-            f"✅ Loaded — Train: `{train_data.shape}` · "
-            f"Test: `{test_data.shape}`"
-        )
+    # ---- Random Forest ----
+    st.markdown("**Step 5 / 5 — Random Forest**")
+    model_rf = build_rf_model()
+    model_rf.fit(seq["X_train_flat"], seq["y_train_ret"])
+    joblib.dump(model_rf, models_dir / "model_random_forest.pkl")
+    trained["Random Forest"] = model_rf
+    overall.progress(1.0, text="All 5 models trained and saved to models/.")
 
-        # ── INDICATORS ──────────────────────────────────────
-        st.write("🔧 Computing technical indicators…")
-        train_len    = len(train_data)
-        combined_len = train_len + len(test_data)
-        combined     = pd.concat([train_data, test_data], axis=0).reset_index(drop=True)
-        combined     = add_indicators(combined)
-        combined.dropna(inplace=True)
-        combined.reset_index(drop=True, inplace=True)
+    for name, fname in HISTORY_FILES.items():
+        if name in histories:
+            with open(models_dir / fname, "w") as f:
+                json.dump(histories[name], f)
 
-        rows_dropped  = combined_len - len(combined)
-        new_train_len = train_len - rows_dropped
+    return trained, histories
 
-        train_data = combined.iloc[:new_train_len].reset_index(drop=True)
-        test_data  = combined.iloc[new_train_len:].reset_index(drop=True)
-        st.write("✅ RSI · MACD · Bollinger Bands added")
+# ======================================================================
+# INFERENCE
+# ======================================================================
+def run_inference(models: dict, seq: dict, scaler):
+    """Reproduces notebook cells #15-#16: validation predictions -> inverse-MAE
+    ensemble weights -> test predictions -> regression metrics, restricted to
+    whichever models actually loaded/trained successfully."""
+    available = [n for n in BASE_MODEL_ORDER if n in models]
 
-        # ── SPLIT & NORMALIZE ───────────────────────────────
-        st.write("📐 Splitting & normalising…")
-        split_idx = int(0.8 * len(train_data))
-        train_df  = train_data.iloc[:split_idx]
-        val_df    = train_data.iloc[split_idx:]
+    def predict(name, X_nn, X_flat, prev_closes):
+        model = models[name]
+        if name in ("BiLSTM", "GRU"):
+            returns = predict_returns(model, X_nn, scaler)
+        else:
+            returns = model.predict(X_flat)
+        return reconstruct_from_returns(returns, prev_closes)
 
-        scaler = MinMaxScaler(feature_range=(0, 1))
-        scaler.fit(train_df[FEATURES].values)
-        train_scaled = scaler.transform(train_df[FEATURES].values)
-        st.write(
-            f"✅ Train: `{train_df.shape[0]}` rows · "
-            f"Val: `{val_df.shape[0]}` rows"
-        )
+    val_preds = {n: predict(n, seq["X_val_nn"], seq["X_val_flat"], seq["prev_closes_val"]) for n in available}
+    val_mae   = {n: mean_absolute_error(seq["val_real"], p) for n, p in val_preds.items()}
 
-        # ── SEQUENCES ───────────────────────────────────────
-        st.write("🔄 Building sequences…")
-        X_train, y_train = build_sequences(train_scaled, SEQ_LEN)
-        X_train_nn  = X_train[:, :, nn_indices]
-        y_train_ret = build_return_targets(train_df['Close'].values, SEQ_LEN)
-
-        val_inputs      = pd.concat(
-            (train_df[FEATURES].tail(SEQ_LEN), val_df[FEATURES]), axis=0
-        )
-        val_scaled_full = scaler.transform(val_inputs.values)
-        X_val, y_val    = build_sequences(val_scaled_full, SEQ_LEN)
-        X_val_nn        = X_val[:, :, nn_indices]
-        y_val_ret       = build_return_targets(val_inputs['Close'].values, SEQ_LEN)
-
-        X_train_flat = X_train.reshape(len(X_train), -1)
-        X_val_flat   = X_val.reshape(len(X_val), -1)
-        st.write(
-            f"✅ X_train: `{X_train.shape}` · "
-            f"X_val: `{X_val.shape}`"
-        )
-
-        # ── BILSTM ──────────────────────────────────────────
-        st.write("🧠 Training BiLSTM…")
-        model_bilstm = Sequential([
-            Bidirectional(LSTM(64, return_sequences=True),
-                          input_shape=(SEQ_LEN, N_FEAT_NN)),
-            Dropout(0.2),
-            Bidirectional(LSTM(64, return_sequences=True)),
-            Dropout(0.2),
-            Bidirectional(LSTM(64)),
-            Dropout(0.2),
-            Dense(1)
-        ], name='BiLSTM')
-        model_bilstm.compile(optimizer='adam', loss='mse')
-        history_bilstm = model_bilstm.fit(
-            X_train_nn, y_train,
-            epochs=MAX_EPOCHS, batch_size=BATCH_SIZE,
-            validation_data=(X_val_nn, y_val),
-            callbacks=[get_early_stop(), get_reduce_lr()],
-            verbose=0
-        )
-        st.write(
-            f"✅ BiLSTM done — "
-            f"`{len(history_bilstm.history['loss'])}` epochs"
-        )
-
-        # ── GRU ─────────────────────────────────────────────
-        st.write("🧠 Training GRU…")
-        model_gru = Sequential([
-            GRU(64, return_sequences=True,
-                input_shape=(SEQ_LEN, N_FEAT_NN)),
-            Dropout(0.2),
-            GRU(64, return_sequences=True),
-            Dropout(0.2),
-            GRU(64),
-            Dropout(0.2),
-            Dense(1)
-        ], name='GRU')
-        model_gru.compile(optimizer='adam', loss='mse')
-        history_gru = model_gru.fit(
-            X_train_nn, y_train,
-            epochs=MAX_EPOCHS, batch_size=BATCH_SIZE,
-            validation_data=(X_val_nn, y_val),
-            callbacks=[get_early_stop(), get_reduce_lr()],
-            verbose=0
-        )
-        st.write(
-            f"✅ GRU done — "
-            f"`{len(history_gru.history['loss'])}` epochs"
-        )
-
-        # ── XGBOOST ─────────────────────────────────────────
-        st.write("🌲 Training XGBoost…")
-        model_xgb = xgb.XGBRegressor(
-            n_estimators=1000, learning_rate=0.01, max_depth=8,
-            subsample=0.8, colsample_bytree=0.8, random_state=42,
-            reg_alpha=0.1, reg_lambda=1, verbosity=0,
-            early_stopping_rounds=20
-        )
-        model_xgb.fit(
-            X_train_flat, y_train_ret,
-            eval_set=[(X_val_flat, y_val_ret)],
-            verbose=False
-        )
-        st.write("✅ XGBoost done")
-
-        # ── LINEAR REGRESSION ───────────────────────────────
-        st.write("📏 Training Linear Regression…")
-        model_lr = LinearRegression()
-        model_lr.fit(X_train_flat, y_train)
-        st.write("✅ Linear Regression done")
-
-        # ── RANDOM FOREST ───────────────────────────────────
-        st.write("🌳 Training Random Forest…")
-        model_rf = RandomForestRegressor(
-            n_estimators=200, max_depth=12, max_features='sqrt',
-            min_samples_split=5, min_samples_leaf=2,
-            random_state=42, n_jobs=-1
-        )
-        model_rf.fit(X_train_flat, y_train_ret)
-        st.write("✅ Random Forest done")
-
-        # ── TEST SET ────────────────────────────────────────
-        st.write("🧪 Preparing test set…")
-        dataset_total = pd.concat(
-            (train_data[FEATURES], test_data[FEATURES]), axis=0
-        )
-        inputs = dataset_total[
-            len(dataset_total) - len(test_data) - SEQ_LEN:
-        ].values
-        inputs = scaler.transform(inputs)
-
-        X_test, _   = build_sequences(inputs, SEQ_LEN)
-        X_test_nn   = X_test[:, :, nn_indices]
-        X_test_flat = X_test.reshape(len(X_test), -1)
-        real_close  = test_data['Close'].values
-
-        assert len(X_test) == len(real_close), (
-            f"Length mismatch: X_test {len(X_test)} vs real_close {len(real_close)}"
-        )
-
-        # ── PREDICTIONS ─────────────────────────────────────
-        st.write("🔮 Generating predictions…")
-        prev_closes_test = np.concatenate([
-            [train_data['Close'].values[-1]],
-            test_data['Close'].values[:-1]
-        ])
-        prev_closes_val = val_inputs['Close'].values[SEQ_LEN - 1 : -1]
-
-        preds = {
-            'BiLSTM':   predict_prices(model_bilstm, X_test_nn, scaler),
-            'GRU':      predict_prices(model_gru,    X_test_nn, scaler),
-            'XGBoost':  reconstruct_from_returns(
-                            model_xgb.predict(X_test_flat), prev_closes_test),
-            'Linear Regression': predict_prices(
-                            model_lr, X_test_flat, scaler, flatten=False, is_keras=False),
-            'Random Forest': reconstruct_from_returns(
-                            model_rf.predict(X_test_flat), prev_closes_test)
-        }
-
-        # Ensemble weights from validation MAE
-        val_real  = inverse_price(y_val, scaler)
-        val_preds = {
-            'BiLSTM':   predict_prices(model_bilstm, X_val_nn, scaler),
-            'GRU':      predict_prices(model_gru,    X_val_nn, scaler),
-            'XGBoost':  reconstruct_from_returns(
-                            model_xgb.predict(X_val_flat), prev_closes_val),
-            'Linear Regression': predict_prices(
-                            model_lr, X_val_flat, scaler, flatten=False, is_keras=False),
-            'Random Forest': reconstruct_from_returns(
-                            model_rf.predict(X_val_flat), prev_closes_val)
-        }
-
-        val_mae   = {n: mean_absolute_error(val_real, p) for n, p in val_preds.items()}
-        inv_mae   = {n: 1 / mae for n, mae in val_mae.items()}
+    weights = {}
+    if len(available) >= 2:
+        inv_mae   = {n: 1.0 / mae if mae > 0 else 0.0 for n, mae in val_mae.items()}
         total_inv = sum(inv_mae.values())
-        ens_weights = {n: w / total_inv for n, w in inv_mae.items()}
+        weights   = {n: w / total_inv for n, w in inv_mae.items()} if total_inv > 0 else {}
 
-        preds['Ensemble'] = sum(
-            ens_weights[n] * preds[n] for n in ens_weights
-        )
+    preds = {n: predict(n, seq["X_test_nn"], seq["X_test_flat"], seq["prev_closes_test"]) for n in available}
+    if weights:
+        preds["Ensemble"] = sum(weights[n] * preds[n] for n in weights)
 
-        # ── METRICS ─────────────────────────────────────────
-        st.write("📊 Computing metrics…")
-        metrics = {}
-        for name, pred in preds.items():
-            rmse = np.sqrt(mean_squared_error(real_close, pred))
-            mae  = mean_absolute_error(real_close, pred)
-            mape = np.mean(np.abs((real_close - pred) / real_close)) * 100
-            r2   = r2_score(real_close, pred)
-            evs  = explained_variance_score(real_close, pred)
-            da   = directional_accuracy(real_close, pred)
-            metrics[name] = dict(
-                RMSE=round(rmse, 4), MAE=round(mae, 4),
-                MAPE=round(mape, 2), R2=round(r2, 4),
-                EVS=round(evs, 4),   DA=round(da, 2)
-            )
-
-        # ── SAVE TO SESSION STATE ───────────────────────────
-        st.session_state['results'] = {
-            'preds':        preds,
-            'real_close':   real_close,
-            'metrics':      metrics,
-            'histories':    {'BiLSTM': history_bilstm, 'GRU': history_gru},
-            'train_data':   train_data,
-            'model_xgb':    model_xgb,
-            'X_train_flat': X_train_flat,
-            'val_mae':      val_mae,
-            'ens_weights':  ens_weights,
-            'seq_len':      SEQ_LEN
-        }
-
-        status.update(
-            label="✅ Training complete!", state="complete", expanded=False
-        )
-
-# ==========================================================
-# RESULTS
-# ==========================================================
-if 'results' in st.session_state:
-    R          = st.session_state['results']
-    preds      = R['preds']
-    real_close = R['real_close']
-    metrics    = R['metrics']
-    histories  = R['histories']
-    train_data = R['train_data']
-    model_xgb  = R['model_xgb']
-    X_train_flat = R['X_train_flat']
-    seq_len    = R['seq_len']
-    ens_weights = R['ens_weights']
-    val_mae    = R['val_mae']
-
-    # ── DERIVED STORY FACTS ──────────────────────────────────
-    best_rmse_model = min(metrics, key=lambda n: metrics[n]['RMSE'])
-    best_r2_model   = max(metrics, key=lambda n: metrics[n]['R2'])
-    best_mape_model = min(metrics, key=lambda n: metrics[n]['MAPE'])
-    best_da_model   = max(metrics, key=lambda n: metrics[n]['DA'])
-    worst_rmse_model = max(metrics, key=lambda n: metrics[n]['RMSE'])
-
-    nn_models   = ['BiLSTM', 'GRU']
-    tree_models = ['XGBoost', 'Random Forest']
-    nn_avg_rmse   = np.mean([metrics[n]['RMSE'] for n in nn_models])
-    tree_avg_rmse = np.mean([metrics[n]['RMSE'] for n in tree_models])
-
-    da_values = [metrics[n]['DA'] for n in metrics]
-    da_spread = max(da_values) - min(da_values)
-    da_mean   = np.mean(da_values)
-
-    ens_rmse_rank = sorted(metrics, key=lambda n: metrics[n]['RMSE']).index('Ensemble') + 1
-
-    tree_wins    = tree_avg_rmse < nn_avg_rmse
-    winner_label = "Tree-based models" if tree_wins else "Recurrent nets"
-    loser_label  = "recurrent nets" if tree_wins else "tree-based models"
-    suits_text   = (
-        "gradient boosting\u2019s tabular splits" if tree_wins
-        else "sequence models at capturing temporal patterns"
+    metrics = {n: compute_regression_metrics(seq["real_close"], p) for n, p in preds.items()}
+    return dict(
+        available=available, preds=preds, val_preds=val_preds,
+        val_mae=val_mae, weights=weights, metrics=metrics,
     )
 
-    # ── HERO VERDICT ──────────────────────────────────────────
+@st.cache_data(show_spinner="Computing SHAP values for XGBoost…")
+def compute_shap(_model_xgb, X_train_flat, sample_size=1000, seed=42):
+    """Underscore-prefixed arg tells Streamlit not to hash the model object
+    itself; X_train_flat's content is what actually determines cache validity."""
+    n = min(sample_size, len(X_train_flat))
+    rng = np.random.default_rng(seed)
+    idx = rng.choice(len(X_train_flat), size=n, replace=False)
+    X_shap = X_train_flat[idx]
+    explainer = shap.TreeExplainer(_model_xgb)
+    shap_values = explainer.shap_values(X_shap)
+    return shap_values, X_shap
+
+# ======================================================================
+# PLOTTING HELPERS
+# ======================================================================
+def render_grid(names, plot_fn, n_cols=3):
+    cols = st.columns(n_cols)
+    for i, name in enumerate(names):
+        with cols[i % n_cols]:
+            fig = plot_fn(name)
+            st.pyplot(fig)
+            plt.close(fig)
+
+def fig_actual_vs_predicted(real_close, preds, selected):
+    fig, ax = plt.subplots(figsize=(14, 6))
+    ax.plot(real_close, label="Actual", color="black", linewidth=2.5, zorder=5)
+    for name in selected:
+        ax.plot(preds[name], label=name, alpha=0.85, color=MODEL_COLORS[name], linewidth=1.5)
+    ax.set_xlabel("Trading Days")
+    ax.set_ylabel("Close Price")
+    ax.set_title("Actual vs Predicted Stock Price", fontsize=14)
+    ax.legend(fontsize=10, frameon=False)
+    plt.tight_layout()
+    return fig
+
+def fig_residual_hist(name, real_close, pred):
+    fig, ax = plt.subplots(figsize=(5, 4))
+    residuals = real_close - pred
+    ax.hist(residuals, bins=30, color=MODEL_COLORS[name], edgecolor="black", alpha=0.75)
+    ax.axvline(0, color="red", linestyle="--", linewidth=1.8)
+    ax.set_title(name, fontsize=11)
+    ax.set_xlabel("Error (Actual − Predicted)")
+    ax.set_ylabel("Frequency")
+    plt.tight_layout()
+    return fig
+
+def fig_residual_scatter(name, real_close, pred):
+    fig, ax = plt.subplots(figsize=(5, 4))
+    residuals = real_close - pred
+    ax.scatter(pred, residuals, color=MODEL_COLORS[name], alpha=0.6, s=20)
+    ax.axhline(0, color="red", linestyle="--", linewidth=1.8)
+    ax.set_title(name, fontsize=11)
+    ax.set_xlabel("Predicted Close Price")
+    ax.set_ylabel("Residuals")
+    plt.tight_layout()
+    return fig
+
+def fig_pred_vs_actual_scatter(name, real_close, pred, r2):
+    fig, ax = plt.subplots(figsize=(5, 4))
+    ax.scatter(real_close, pred, color=MODEL_COLORS[name], alpha=0.6, s=20)
+    mn, mx = min(real_close.min(), pred.min()), max(real_close.max(), pred.max())
+    ax.plot([mn, mx], [mn, mx], "r--", linewidth=1.8)
+    ax.set_title(name, fontsize=11)
+    ax.set_xlabel("Actual Close")
+    ax.set_ylabel("Predicted Close")
+    ax.text(0.05, 0.92, f"R²={r2:.3f}", transform=ax.transAxes, fontsize=9,
+            bbox=dict(boxstyle="round", fc="white", alpha=0.7))
+    plt.tight_layout()
+    return fig
+
+def fig_metric_bar(metric, metrics, names):
+    fig, ax = plt.subplots(figsize=(5, 4))
+    values = [metrics[n][metric] for n in names]
+    colors = [MODEL_COLORS[n] for n in names]
+    bars = ax.bar(names, values, color=colors, edgecolor="black", width=0.6)
+    ax.set_title(METRIC_LABELS[metric], fontsize=11)
+    ax.set_xticks(range(len(names)))
+    ax.set_xticklabels(names, rotation=25, ha="right", fontsize=8)
+    span = (ax.get_ylim()[1] - ax.get_ylim()[0]) or 1.0
+    for bar, val in zip(bars, values):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + span * 0.015,
+                f"{val:.3f}", ha="center", va="bottom", fontsize=8)
+    plt.tight_layout()
+    return fig
+
+def fig_loss_curve(name, history):
+    fig, ax = plt.subplots(figsize=(6, 4))
+    ax.plot(history["loss"], label="Train Loss", linewidth=2)
+    ax.plot(history["val_loss"], label="Val Loss", linewidth=2, linestyle="--")
+    ax.set_title(f"{name} — Loss Curve", fontsize=12)
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("MSE")
+    ax.legend(frameon=False)
+    plt.tight_layout()
+    return fig
+
+def fig_correlation_heatmap(corr, title, cmap, mask_upper=False):
+    fig, ax = plt.subplots(figsize=(9, 7))
+    mask = np.triu(np.ones_like(corr, dtype=bool)) if mask_upper else None
+    sns.heatmap(corr, annot=True, fmt=".2f", cmap=cmap, mask=mask, square=True,
+                linewidths=0.5, annot_kws={"size": 9}, ax=ax)
+    ax.set_title(title, fontsize=13, pad=10)
+    plt.tight_layout()
+    return fig
+
+def fig_barh_importance(labels, values, color, xlabel, title):
+    order = np.argsort(values)
+    fig, ax = plt.subplots(figsize=(9, 5))
+    ax.barh([labels[i] for i in order], np.array(values)[order], color=color, edgecolor="black", alpha=0.9)
+    ax.set_xlabel(xlabel)
+    ax.set_title(title, fontsize=13)
+    plt.tight_layout()
+    return fig
+
+# ======================================================================
+# SIDEBAR — status & actions (rendered after data/model state is known)
+# ======================================================================
+def render_sidebar_header():
+    with st.sidebar:
+        st.markdown("## 📈 Stock Price Prediction")
+        st.caption("Five models + a weighted ensemble — served straight from STMP.ipynb.")
+        st.divider()
+
+def render_sidebar_footer(source_label, rows_dropped, chron_warning):
+    with st.sidebar:
+        st.divider()
+        with st.expander("ℹ️ About this dashboard"):
+            st.markdown(
+                "This app re-runs the exact feature engineering and inference logic "
+                "from `STMP.ipynb` — RSI/MACD/Bollinger-derived return features, a "
+                "60-day lookback window, and five independently trained models "
+                "blended into an inverse-MAE ensemble.\n\n"
+                "Model binaries and plots are intentionally excluded from version "
+                "control (see `.gitignore`) and regenerated locally — either by "
+                "running the notebook, or with the **Train All Models** action here."
+            )
+        if chron_warning:
+            st.caption(f"⚠️ {chron_warning}")
+        st.caption(f"Data source: **{source_label}** · {rows_dropped} row(s) dropped for indicator warm-up.")
+        st.caption("Built with Streamlit · TensorFlow/Keras · XGBoost · scikit-learn · SHAP")
+
+# ======================================================================
+# LANDING STATES
+# ======================================================================
+def render_no_data_landing():
+    eyebrow_title("SETUP", "No dataset found yet")
+    st.markdown(
+        "This dashboard needs OHLCV data with columns "
+        f"`{', '.join(REQUIRED_COLUMNS)}` (a `Date` column is recommended but optional)."
+    )
+    st.info(
+        f"Place **Trainset.xlsx** and **Testset.xlsx** in `{DATA_DIR.relative_to(BASE_DIR)}/`, "
+        "or switch to **Upload my own Excel files** in the sidebar."
+    )
+
+def render_data_error(err: Exception):
+    eyebrow_title("DATA ERROR", "The uploaded/bundled data couldn't be processed")
+    st.error(str(err))
+    with st.expander("Full traceback"):
+        st.code(traceback.format_exc())
+
+def render_no_models_state(errors, seq, models_dir):
+    eyebrow_title("ONE-TIME SETUP", "No trained models found yet")
+    st.markdown(
+        "`models/` is empty or unreadable — expected on a fresh clone, since trained "
+        "weights are `.gitignore`d and regenerated locally. Train all five models now "
+        "with the exact architecture and hyperparameters from `STMP.ipynb`:\n\n"
+        "- **BiLSTM** & **GRU** — up to 100 epochs each, early-stopped (patience 20)\n"
+        "- **XGBoost** — 1,000 rounds, early-stopped (patience 20)\n"
+        "- **Linear Regression** and **Random Forest** — fit directly (seconds)\n\n"
+        "This runs once and takes a few minutes on CPU. Every future load will read "
+        "the saved weights from `models/` instantly instead of retraining."
+    )
+    with st.expander("Why isn't a model already loaded?"):
+        for name, err in errors.items():
+            st.caption(f"**{name}** — {err}")
+    if st.button("🚀 Train All 5 Models Now", type="primary"):
+        st.session_state["_run_training"] = True
+        st.rerun()
+
+# ======================================================================
+# MAIN DASHBOARD
+# ======================================================================
+def render_dashboard(train_data, val_df_full, train_df, val_df, test_data,
+                      seq, models, model_errors, results, histories, models_dir):
+    available   = results["available"]
+    preds       = results["preds"]
+    metrics     = results["metrics"]
+    weights     = results["weights"]
+    val_mae     = results["val_mae"]
+    real_close  = seq["real_close"]
+    shown_names = [n for n in ALL_MODEL_ORDER if n in metrics]
+
+    if model_errors:
+        missing = ", ".join(model_errors.keys())
+        st.warning(
+            f"Showing results for **{len(available)} of 5** base models — "
+            f"unavailable: {missing}. Train the full set for the complete comparison."
+        )
+        if st.button("🚀 Train All 5 Models Now", key="retrain_partial"):
+            st.session_state["_run_training"] = True
+            st.rerun()
+
+    # ---- derived story facts ----
+    best_rmse  = models_at_extreme(metrics, "RMSE", "min")
+    worst_rmse = models_at_extreme(metrics, "RMSE", "max")
+    best_r2    = models_at_extreme(metrics, "R2", "max")
+    best_mape  = models_at_extreme(metrics, "MAPE", "min")
+    best_da    = models_at_extreme(metrics, "DA", "max")
+    da_values  = [metrics[n]["DA"] for n in shown_names]
+
+    ens_rank_line = ""
+    if "Ensemble" in metrics:
+        rank = sorted(metrics, key=lambda n: metrics[n]["RMSE"]).index("Ensemble") + 1
+        ens_rank_line = f" The Ensemble ranks #{rank} of {len(shown_names)} on RMSE."
+
+    # ---- hero verdict ----
     eyebrow_title("RESULT", "The Bottom Line")
     verdict(
-        f"<b>{best_rmse_model}</b> produced the lowest price-tracking error "
-        f"(RMSE {metrics[best_rmse_model]['RMSE']:.2f}, R²={metrics[best_rmse_model]['R2']:.3f}), "
-        f"outperforming the weaker end of the field by a wide margin — "
-        f"{worst_rmse_model} trailed at RMSE {metrics[worst_rmse_model]['RMSE']:.2f}. "
-        f"{winner_label} averaged {min(tree_avg_rmse, nn_avg_rmse):.2f} RMSE vs. "
-        f"{max(tree_avg_rmse, nn_avg_rmse):.2f} for the {loser_label}, "
-        f"suggesting the engineered technical-indicator features suit "
-        f"{suits_text} better on this dataset. "
-        f"The Ensemble landed #{ens_rmse_rank} of 6 on RMSE — its role is "
-        f"variance reduction across regimes, not beating the single best model."
+        f"<b>{' / '.join(best_rmse)}</b> produced the lowest test-set price-tracking error "
+        f"(RMSE {metrics[best_rmse[0]]['RMSE']:.2f}, R²={metrics[best_rmse[0]]['R2']:.3f}), "
+        f"while <b>{' / '.join(worst_rmse)}</b> trailed at RMSE {metrics[worst_rmse[0]]['RMSE']:.2f}."
+        + ens_rank_line
     )
     caveat(
-        f"Directional Accuracy sits at {da_mean:.1f}% on average (range "
-        f"{min(da_values):.1f}–{max(da_values):.1f}%) — essentially a coin "
-        f"flip. This is expected: day-to-day price <i>direction</i> behaves "
-        f"close to a random walk, while price <i>level</i> is highly "
-        f"autocorrelated (today's price is close to yesterday's). The high "
-        f"R² scores reflect the latter, not a trading edge. "
-        f"<b>Don't read these models as directional trading signals.</b>"
+        f"Directional Accuracy sits at {min(da_values):.1f}–{max(da_values):.1f}% across "
+        f"models — barely above a coin flip. This is expected: day-to-day price "
+        f"<i>direction</i> behaves close to a random walk, while price <i>level</i> is "
+        f"highly autocorrelated (today's close is close to yesterday's). The strong R² "
+        f"scores reflect the latter, not a trading edge — <b>don't read these models as "
+        f"directional trading signals.</b>"
     )
 
-    # ── DECISION GUIDE ────────────────────────────────────────
+    # ---- decision guide ----
     eyebrow_title("DECISION GUIDE", "Which model should you actually use?")
+    ensemble_card = ""
+    if "Ensemble" in metrics:
+        ensemble_card = f'''<div class="decision-card">
+            <div class="dc-label">Want a single blended estimate</div>
+            <div class="dc-model" style="color:{MODEL_COLORS['Ensemble']}">Ensemble</div>
+            <div class="dc-why">Inverse-validation-MAE blend of all base models — hedges
+            against any one model's regime-specific failures, though on this run it does
+            not beat the single best model on RMSE.</div>
+        </div>'''
     st.markdown(
         f'''<div class="decision-grid">
         <div class="decision-card">
             <div class="dc-label">Track price level accurately</div>
-            <div class="dc-model" style="color:{MODEL_COLORS[best_rmse_model]}">{best_rmse_model}</div>
-            <div class="dc-why">Lowest RMSE/MAPE — closest fit to actual close price.
-            Best choice for valuation-style tracking, not entry/exit timing.</div>
+            <div class="dc-model" style="color:{MODEL_COLORS[best_rmse[0]]}">{' / '.join(best_rmse)}</div>
+            <div class="dc-why">Lowest RMSE/MAPE on the held-out test set — best suited to
+            valuation-style tracking, not entry/exit timing.</div>
         </div>
-        <div class="decision-card">
-            <div class="dc-label">Want stability across models</div>
-            <div class="dc-model" style="color:{MODEL_COLORS['Ensemble']}">Ensemble</div>
-            <div class="dc-why">Blends all five models weighted by inverse validation
-            error — smooths out any single model's regime-specific failures.</div>
-        </div>
+        {ensemble_card}
         <div class="decision-card">
             <div class="dc-label">Calling next-day direction</div>
             <div class="dc-model" style="color:#DC2626">None reliably</div>
-            <div class="dc-why">All models cluster near {da_mean:.0f}% directional
-            accuracy — no better than chance. Don't use any of these for buy/sell timing.</div>
+            <div class="dc-why">All models cluster near {np.mean(da_values):.0f}% directional
+            accuracy — indistinguishable from chance. Don't use any of these for buy/sell timing.</div>
         </div>
         </div>''',
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
 
-    # ── KPI ROW ─────────────────────────────────────────────
+    # ---- KPI row ----
     k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Best RMSE (lower ↓ is better)", best_rmse_model)
-    k1.caption(f"↓ {metrics[best_rmse_model]['RMSE']:.4f}")
-    k2.metric("Best R² (higher ↑ is better)", best_r2_model)
-    k2.caption(f"↑ {metrics[best_r2_model]['R2']:.4f}")
-    k3.metric("Best MAPE (lower ↓ is better)", best_mape_model)
-    k3.caption(f"↓ {metrics[best_mape_model]['MAPE']:.2f}%")
-    k4.metric("Best DA (higher ↑ is better)", best_da_model)
-    k4.caption(f"↑ {metrics[best_da_model]['DA']:.2f}%")
+    k1.metric("Best RMSE", " / ".join(best_rmse)); k1.caption(f"↓ {metrics[best_rmse[0]]['RMSE']:.4f}")
+    k2.metric("Best R²", " / ".join(best_r2));     k2.caption(f"↑ {metrics[best_r2[0]]['R2']:.4f}")
+    k3.metric("Best MAPE", " / ".join(best_mape)); k3.caption(f"↓ {metrics[best_mape[0]]['MAPE']:.2f}%")
+    k4.metric("Best Directional Acc.", " / ".join(best_da)); k4.caption(f"↑ {metrics[best_da[0]]['DA']:.2f}%")
 
+    st.write("".join(model_pill(n) for n in shown_names), unsafe_allow_html=True)
     st.divider()
 
-    # ── TABS ────────────────────────────────────────────────
     tab1, tab2, tab3, tab4 = st.tabs([
-        "📖 The Story",
-        "🏆 Model Showdown",
-        "🔬 Under the Hood",
-        "🧬 What Drives Predictions"
+        "📖 Overview", "🏆 Model Showdown", "🔬 Diagnostics", "🧬 Feature Insights",
     ])
 
-    # ────────────────────────────────────────────────────────
-    # TAB 1 — THE STORY
-    # ────────────────────────────────────────────────────────
+    # ==================================================================
+    # TAB 1 — OVERVIEW
+    # ==================================================================
     with tab1:
-        eyebrow_title("OVERVIEW", "Actual vs Predicted")
-        selected_models = st.multiselect(
-            "Models to plot",
-            options=list(MODEL_COLORS.keys()),
-            default=list(MODEL_COLORS.keys()),
-            key="overview_model_select",
-            label_visibility="collapsed"
+        eyebrow_title("DATASET", "Snapshot")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Train rows (post-warmup)", f"{len(train_data):,}")
+        c2.metric("→ Train / Val split", f"{len(train_df)} / {len(val_df)}")
+        c3.metric("Test rows", f"{len(test_data):,}")
+        c4.metric("Lookback window", f"{SEQ_LEN} days")
+
+        full_close = pd.concat([train_data["Close"], test_data["Close"]], ignore_index=True)
+        chart_df = pd.DataFrame({
+            "Close": full_close,
+            "Split": ["Train"] * len(train_df) + ["Validation"] * len(val_df) + ["Test"] * len(test_data),
+        })
+        st.line_chart(chart_df["Close"], height=180)
+        st.caption(
+            f"Full Close-price series — first {len(train_df)} rows train, next "
+            f"{len(val_df)} validation, final {len(test_data)} held-out test."
         )
-        if not selected_models:
-            st.warning("Select at least one model to plot.")
-            selected_models = list(MODEL_COLORS.keys())
-
-        fig, ax = plt.subplots(figsize=(14, 6))
-        ax.plot(real_close, label='Actual', color='black',
-                linewidth=2.5, zorder=5)
-        for name in selected_models:
-            ax.plot(preds[name], label=name, alpha=0.85,
-                    color=MODEL_COLORS[name], linewidth=1.5)
-        ax.set_xlabel('Trading Days')
-        ax.set_ylabel('Close Price')
-        ax.set_title('Actual vs Predicted Stock Price', fontsize=14)
-        ax.legend(fontsize=10, frameon=False)
-        plt.tight_layout()
-        st.pyplot(fig)
-        plt.close(fig)
-
-        shown_metrics = {n: metrics[n] for n in selected_models}
-        tightest = min(shown_metrics, key=lambda n: shown_metrics[n]['RMSE'])
-        loosest  = max(shown_metrics, key=lambda n: shown_metrics[n]['RMSE'])
-        if len(selected_models) > 1:
-            insight(
-                f"<b>{tightest}</b> (RMSE {metrics[tightest]['RMSE']:.2f}) hugs "
-                f"the actual price line most closely among the models shown, "
-                f"including through the sharp reversals mid-series. "
-                f"<b>{loosest}</b> (RMSE {metrics[loosest]['RMSE']:.2f}) "
-                f"visibly lags or smooths over those moves — a sign it's "
-                f"undershooting volatility rather than tracking it."
-            )
-        else:
-            insight(
-                f"<b>{tightest}</b> alone — RMSE {metrics[tightest]['RMSE']:.2f}, "
-                f"R²={metrics[tightest]['R2']:.3f}. Add more models above to "
-                f"compare how closely each tracks the actual price line."
-            )
 
         st.divider()
-        eyebrow_title("SCORECARD", "Regression Metrics")
+        eyebrow_title("OVERVIEW", "Actual vs Predicted (test set)")
+        selected = st.multiselect(
+            "Models to plot", options=shown_names, default=shown_names,
+            key="overview_model_select", label_visibility="collapsed",
+        )
+        if not selected:
+            st.warning("Select at least one model to plot.")
+            selected = shown_names
+        st.pyplot(fig_actual_vs_predicted(real_close, preds, selected))
 
-        metrics_df = pd.DataFrame(metrics).T
-        metrics_df.index.name = 'Model'
+        shown_m = {n: metrics[n] for n in selected}
+        tightest = min(shown_m, key=lambda n: shown_m[n]["RMSE"])
+        loosest  = max(shown_m, key=lambda n: shown_m[n]["RMSE"])
+        if len(selected) > 1:
+            insight(
+                f"<b>{tightest}</b> (RMSE {metrics[tightest]['RMSE']:.2f}) hugs the actual "
+                f"price line most closely among the models shown. <b>{loosest}</b> "
+                f"(RMSE {metrics[loosest]['RMSE']:.2f}) diverges the most — check the "
+                f"residual plots in <i>Diagnostics</i> for where it goes wrong."
+            )
+        else:
+            insight(f"<b>{tightest}</b> alone — RMSE {metrics[tightest]['RMSE']:.2f}, "
+                    f"R²={metrics[tightest]['R2']:.3f}.")
+
+        st.divider()
+        eyebrow_title("SCORECARD", "Regression Metrics — Test Set")
+        metrics_df = pd.DataFrame({n: metrics[n] for n in shown_names}).T
+        metrics_df.index.name = "Model"
 
         def highlight_best(df):
-            styles = pd.DataFrame('', index=df.index, columns=df.columns)
-            for col in ['RMSE', 'MAE', 'MAPE']:
-                best = df[col].min()
-                styles.loc[df[col] == best, col] = (
-                    'background-color: #d4edda; '
-                    'color: #155724; font-weight: bold'
-                )
-            for col in ['R2', 'EVS', 'DA']:
-                best = df[col].max()
-                styles.loc[df[col] == best, col] = (
-                    'background-color: #d4edda; '
-                    'color: #155724; font-weight: bold'
+            styles = pd.DataFrame("", index=df.index, columns=df.columns)
+            for col in df.columns:
+                best = df[col].min() if col in LOWER_IS_BETTER else df[col].max()
+                styles.loc[np.isclose(df[col], best), col] = (
+                    "background-color: #d4edda; color: #155724; font-weight: bold"
                 )
             return styles
 
         st.dataframe(
-            metrics_df.style
-                .apply(highlight_best, axis=None)
-                .format({
-                    'RMSE': '{:.4f}', 'MAE':  '{:.4f}',
-                    'MAPE': '{:.2f}%','R2':   '{:.4f}',
-                    'EVS':  '{:.4f}', 'DA':   '{:.2f}%'
-                }),
-            use_container_width=True,
-            height=280
+            metrics_df.style.apply(highlight_best, axis=None).format({
+                "RMSE": "{:.4f}", "MAE": "{:.4f}", "MAPE": "{:.2f}%",
+                "R2": "{:.4f}", "EVS": "{:.4f}", "DA": "{:.2f}%",
+            }),
+            width="stretch", height=min(280, 45 * (len(shown_names) + 1)),
         )
         caveat(
-            "Directional Accuracy (DA) near 50% is expected — price "
-            "direction behaves close to a random walk. High R² reflects "
-            "strong price-<i>level</i> autocorrelation, not directional "
-            "predictability. Judge these models on RMSE/MAE/R², not DA."
+            "Directional Accuracy (DA) near 50% is expected for daily price moves. "
+            "Judge these models on RMSE/MAE/R² for level-tracking quality, not DA."
         )
 
-        st.divider()
-        eyebrow_title("ENSEMBLE", "Ensemble Weights")
-        wdf = pd.DataFrame({
-            'Validation MAE': val_mae,
-            'Weight':         ens_weights
-        }).sort_values('Weight', ascending=False)
-        st.dataframe(
-            wdf.style.format(
-                {'Validation MAE': '{:.4f}', 'Weight': '{:.4f}'}
-            ).bar(subset=['Weight'], color='#4472C4'),
-            use_container_width=True
-        )
-        top_weight_model = wdf.index[0]
-        insight(
-            f"Weights are inverse-MAE on the validation set, so "
-            f"<b>{top_weight_model}</b> — the most accurate validator — "
-            f"dominates the blend at {wdf.loc[top_weight_model, 'Weight']:.1%}. "
-            f"This makes the Ensemble a hedge against any one model "
-            f"overfitting to validation-specific patterns, rather than a "
-            f"pure accuracy play."
-        )
+        if weights:
+            st.divider()
+            eyebrow_title("ENSEMBLE", "Weights (inverse validation-MAE)")
+            wdf = pd.DataFrame({"Validation MAE": val_mae, "Weight": weights}).sort_values("Weight", ascending=False)
+            st.dataframe(
+                wdf.style.format({"Validation MAE": "{:.4f}", "Weight": "{:.4f}"})
+                    .bar(subset=["Weight"], color="#4472C4"),
+                width="stretch",
+            )
+            top_w = wdf.index[0]
+            worst_w = wdf.index[-1]
+            insight(
+                f"<b>{top_w}</b> — the most accurate on validation — dominates the blend "
+                f"at {wdf.loc[top_w, 'Weight']:.1%}. <b>{worst_w}</b> contributes the least "
+                f"({wdf.loc[worst_w, 'Weight']:.1%}) but still pulls the average toward its "
+                f"weaker predictions, which is part of why the Ensemble doesn't automatically "
+                f"beat the single best base model on this run."
+            )
 
-    # ────────────────────────────────────────────────────────
+    # ==================================================================
     # TAB 2 — MODEL SHOWDOWN
-    # ────────────────────────────────────────────────────────
+    # ==================================================================
     with tab2:
         eyebrow_title("HEAD TO HEAD", "Metric Comparison — All Models")
-
-        metric_list   = ['RMSE', 'MAE', 'MAPE', 'R2', 'EVS', 'DA']
-        metric_labels = {
-            'RMSE': 'RMSE (lower ↓)',
-            'MAE':  'MAE (lower ↓)',
-            'MAPE': 'MAPE % (lower ↓)',
-            'R2':   'R² (higher ↑)',
-            'EVS':  'Explained Variance (higher ↑)',
-            'DA':   'Directional Accuracy % (higher ↑)'
-        }
-        model_names = list(MODEL_COLORS.keys())
-        colors      = list(MODEL_COLORS.values())
-
+        metric_keys = ["RMSE", "MAE", "MAPE", "R2", "EVS", "DA"]
         cols = st.columns(3)
-        for idx, metric in enumerate(metric_list):
-            with cols[idx % 3]:
-                fig, ax = plt.subplots(figsize=(5, 4))
-                values = [metrics[n][metric] for n in model_names]
-                bars   = ax.bar(model_names, values, color=colors,
-                                edgecolor='black', width=0.6)
-                ax.set_title(metric_labels[metric], fontsize=11)
-                ax.set_xticklabels(model_names, rotation=25,
-                                   ha='right', fontsize=8)
-                for bar, val in zip(bars, values):
-                    offset = (ax.get_ylim()[1] - ax.get_ylim()[0]) * 0.015
-                    ax.text(
-                        bar.get_x() + bar.get_width() / 2,
-                        bar.get_height() + offset,
-                        f'{val:.3f}', ha='center', va='bottom', fontsize=8
-                    )
-                plt.tight_layout()
-                st.pyplot(fig)
-                plt.close(fig)
-
+        for i, m in enumerate(metric_keys):
+            with cols[i % 3]:
+                st.pyplot(fig_metric_bar(m, metrics, shown_names))
         insight(
-            f"<b>{best_rmse_model}</b> sweeps most error-based metrics "
-            f"(RMSE, MAE, MAPE), while directional accuracy stays flat "
-            f"across all six models — reinforcing that model choice "
-            f"changes <i>how precisely</i> you track price, not "
-            f"<i>whether</i> you can predict its direction."
+            f"<b>{' / '.join(best_rmse)}</b> leads the error-based metrics (RMSE, MAE, "
+            f"MAPE), while Directional Accuracy stays flat across every model — model "
+            f"choice changes <i>how precisely</i> you track price, not <i>whether</i> you "
+            f"can call its direction."
         )
 
         st.divider()
-        eyebrow_title("FIT QUALITY", "Predicted vs Actual Scatter Plots")
-        st.caption(
-            "Points hugging the red diagonal = accurate predictions. "
-            "Spread away from the line = systematic error."
-        )
-        cols2 = st.columns(3)
-        for idx, (name, pred) in enumerate(preds.items()):
-            with cols2[idx % 3]:
-                fig, ax = plt.subplots(figsize=(5, 4))
-                ax.scatter(real_close, pred,
-                           color=MODEL_COLORS[name], alpha=0.6, s=20)
-                mn = min(real_close.min(), pred.min())
-                mx = max(real_close.max(), pred.max())
-                ax.plot([mn, mx], [mn, mx], 'r--', linewidth=1.8)
-                ax.set_title(f'{name}', fontsize=11)
-                ax.set_xlabel('Actual Close')
-                ax.set_ylabel('Predicted Close')
-                r2 = metrics[name]['R2']
-                ax.text(0.05, 0.92, f'R²={r2:.3f}',
-                        transform=ax.transAxes, fontsize=9,
-                        bbox=dict(boxstyle='round', fc='white', alpha=0.7))
-                plt.tight_layout()
-                st.pyplot(fig)
-                plt.close(fig)
-
+        eyebrow_title("FIT QUALITY", "Predicted vs Actual — Test Set")
+        st.caption("Points hugging the red diagonal = accurate predictions.")
+        render_grid(shown_names, lambda n: fig_pred_vs_actual_scatter(n, real_close, preds[n], metrics[n]["R2"]))
         insight(
-            f"The tightest cluster around the diagonal belongs to "
-            f"<b>{best_r2_model}</b> (R²={metrics[best_r2_model]['R2']:.3f}). "
-            f"Any model whose cloud bends away from the line at price "
-            f"extremes is systematically over- or under-shooting during "
-            f"large moves — worth checking against the residual plots in "
-            f"<i>Under the Hood</i>."
+            f"The tightest cluster around the diagonal belongs to <b>{' / '.join(best_r2)}</b> "
+            f"(R²={metrics[best_r2[0]]['R2']:.3f}). Any cloud bending away from the line at "
+            f"price extremes is over/under-shooting during large moves."
         )
 
-    # ────────────────────────────────────────────────────────
-    # TAB 3 — UNDER THE HOOD
-    # ────────────────────────────────────────────────────────
+    # ==================================================================
+    # TAB 3 — DIAGNOSTICS
+    # ==================================================================
     with tab3:
-        eyebrow_title("TRAINING BEHAVIOR", "Training & Validation Loss Curves")
-        cols3 = st.columns(2)
-        overfit_notes = []
-        for idx, (name, hist) in enumerate(histories.items()):
-            with cols3[idx % 2]:
-                fig, ax = plt.subplots(figsize=(6, 4))
-                ax.plot(hist.history['loss'],
-                        label='Train Loss', linewidth=2)
-                ax.plot(hist.history['val_loss'],
-                        label='Val Loss', linewidth=2, linestyle='--')
-                ax.set_title(f'{name} — Loss Curve', fontsize=12)
-                ax.set_xlabel('Epoch')
-                ax.set_ylabel('MSE')
-                ax.legend(frameon=False)
-                plt.tight_layout()
-                st.pyplot(fig)
-                plt.close(fig)
-            final_train = hist.history['loss'][-1]
-            final_val   = hist.history['val_loss'][-1]
-            gap_pct = (final_val - final_train) / max(final_train, 1e-9) * 100
-            overfit_notes.append((name, gap_pct, len(hist.history['loss'])))
-
-        widest = max(overfit_notes, key=lambda t: abs(t[1]))
-        insight(
-            f"Early stopping triggered convergence for both nets. "
-            f"<b>{widest[0]}</b> shows the widest train/validation gap "
-            f"({widest[1]:+.0f}%) — a modest positive gap is normal, but a "
-            f"large one signals the model is starting to memorize training "
-            f"noise rather than generalizing."
-        )
+        eyebrow_title("TRAINING BEHAVIOR", "Loss Curves — BiLSTM & GRU")
+        nn_histories = {n: histories[n] for n in ("BiLSTM", "GRU") if n in histories}
+        if nn_histories:
+            cols = st.columns(2)
+            overfit_notes = []
+            for i, (name, hist) in enumerate(nn_histories.items()):
+                with cols[i % 2]:
+                    st.pyplot(fig_loss_curve(name, hist))
+                final_train, final_val = hist["loss"][-1], hist["val_loss"][-1]
+                gap_pct = (final_val - final_train) / max(final_train, 1e-9) * 100
+                overfit_notes.append((name, gap_pct, len(hist["loss"])))
+            widest = max(overfit_notes, key=lambda t: abs(t[1]))
+            insight(
+                f"<b>{widest[0]}</b> shows the widest train/validation loss gap "
+                f"({widest[1]:+.0f}%) after {widest[2]} epochs. A modest positive gap is "
+                f"normal; a large one signals memorization rather than generalization."
+            )
+        else:
+            st.info(
+                "Loss history isn't available for the currently loaded models — it isn't "
+                "saved by a plain `model.save()`. Use **Train All 5 Models Now** in the "
+                "sidebar to generate fresh curves for this session (and future ones)."
+            )
 
         st.divider()
         eyebrow_title("ERROR BEHAVIOR", "Residual Distributions")
-        st.caption(
-            "A distribution centered on zero with no skew means the model "
-            "isn't systematically biased high or low."
-        )
-        cols4 = st.columns(3)
-        bias_notes = {}
-        for idx, (name, pred) in enumerate(preds.items()):
-            with cols4[idx % 3]:
-                fig, ax = plt.subplots(figsize=(5, 4))
-                residuals = real_close - pred
-                bias_notes[name] = float(np.mean(residuals))
-                ax.hist(residuals, bins=30,
-                        color=MODEL_COLORS[name],
-                        edgecolor='black', alpha=0.75)
-                ax.axvline(0, color='red', linestyle='--', linewidth=1.8)
-                ax.set_title(name, fontsize=11)
-                ax.set_xlabel('Error (Actual − Predicted)')
-                ax.set_ylabel('Frequency')
-                plt.tight_layout()
-                st.pyplot(fig)
-                plt.close(fig)
-
-        most_biased = max(bias_notes, key=lambda n: abs(bias_notes[n]))
-        direction = "under" if bias_notes[most_biased] > 0 else "over"
+        st.caption("Centered on zero with no skew = the model isn't systematically biased high or low.")
+        render_grid(shown_names, lambda n: fig_residual_hist(n, real_close, preds[n]))
+        bias = {n: float(np.mean(real_close - preds[n])) for n in shown_names}
+        most_biased = max(bias, key=lambda n: abs(bias[n]))
+        direction = "under" if bias[most_biased] > 0 else "over"
         insight(
-            f"<b>{most_biased}</b> shows the strongest systematic bias — "
-            f"its residuals average {bias_notes[most_biased]:+.2f}, meaning "
-            f"it tends to <b>{direction}predict</b> actual price on net, "
-            f"rather than erring randomly in both directions."
+            f"<b>{most_biased}</b> shows the strongest systematic bias — its residuals "
+            f"average {bias[most_biased]:+.2f}, meaning it tends to <b>{direction}predict</b> "
+            f"on net rather than erring randomly in both directions."
         )
 
         st.divider()
         eyebrow_title("HETEROSKEDASTICITY CHECK", "Residual Scatter Plots")
-        st.caption(
-            "A random horizontal band = well-behaved errors. A funnel or "
-            "trend shape = error grows with price level."
-        )
-        cols5 = st.columns(3)
-        for idx, (name, pred) in enumerate(preds.items()):
-            with cols5[idx % 3]:
-                fig, ax = plt.subplots(figsize=(5, 4))
-                residuals = real_close - pred
-                ax.scatter(pred, residuals,
-                           color=MODEL_COLORS[name], alpha=0.6, s=20)
-                ax.axhline(0, color='red', linestyle='--', linewidth=1.8)
-                ax.set_title(name, fontsize=11)
-                ax.set_xlabel('Predicted Close Price')
-                ax.set_ylabel('Residuals')
-                plt.tight_layout()
-                st.pyplot(fig)
-                plt.close(fig)
+        st.caption("A random horizontal band = well-behaved errors. A funnel shape = error grows with price level.")
+        render_grid(shown_names, lambda n: fig_residual_scatter(n, real_close, preds[n]))
         insight(
-            "Watch for a funnel shape widening at higher predicted prices — "
-            "that pattern (heteroskedasticity) means the model's error "
-            "scales with price level, so a flat MAE understates risk during "
-            "high-price periods."
+            "Watch for a funnel widening at higher predicted prices — that pattern "
+            "(heteroskedasticity) means error scales with price level, so a flat MAE "
+            "understates risk during high-price periods."
         )
 
-    # ────────────────────────────────────────────────────────
-    # TAB 4 — WHAT DRIVES PREDICTIONS
-    # ────────────────────────────────────────────────────────
+    # ==================================================================
+    # TAB 4 — FEATURE INSIGHTS
+    # ==================================================================
     with tab4:
-        eyebrow_title("FEATURE RELATIONSHIPS", "Feature Correlation Heatmap")
-        corr = train_data[FEATURES].corr()
-        fig, ax = plt.subplots(figsize=(12, 9))
-        sns.heatmap(
-            corr,
-            annot=True, fmt='.2f', cmap='RdYlGn',
-            linewidths=0.5, square=True,
-            annot_kws={'size': 10}, ax=ax
-        )
-        ax.set_title('Feature Correlation Matrix', fontsize=14)
-        plt.tight_layout()
-        st.pyplot(fig)
-        plt.close(fig)
+        eyebrow_title("FEATURE RELATIONSHIPS", "Correlation Heatmap (full training set)")
+        corr_full = train_data[FEATURES].corr()
+        st.pyplot(fig_correlation_heatmap(corr_full, "Feature Correlation Matrix", "RdYlGn"))
 
-        # find strongest non-trivial off-diagonal correlation excluding OHLC group
-        ohlc_like = {'Open', 'High', 'Low', 'Close', 'Adj Close'}
-        best_pair, best_val = None, 0
+        best_pair, best_val = None, 0.0
         for i, f1 in enumerate(FEATURES):
-            for f2 in FEATURES[i+1:]:
-                if f1 in ohlc_like and f2 in ohlc_like:
-                    continue
-                v = abs(corr.loc[f1, f2])
+            for f2 in FEATURES[i + 1:]:
+                v = abs(corr_full.loc[f1, f2])
                 if v > best_val:
                     best_val, best_pair = v, (f1, f2)
-
         insight(
-            f"OHLC-family columns (Open/High/Low/Close/Adj Close) are "
-            f"correlated at ~1.00 with each other — expected, since they "
-            f"move together intraday. This near-perfect collinearity is "
-            f"exactly why the neural nets train on a trimmed feature set "
-            f"(<code>{', '.join(NN_FEATURES)}</code>) instead of all "
-            f"{N_FEAT} raw columns: feeding collinear inputs to a "
-            f"sequence model inflates variance without adding signal. "
-            f"Outside that group, the strongest relationship is "
-            f"<b>{best_pair[0]} ↔ {best_pair[1]}</b> at {best_val:.2f} — "
-            f"MACD and its signal line are related by construction "
-            f"(one is a smoothed version of the other)."
+            f"The strongest relationship outside a feature and itself is "
+            f"<b>{best_pair[0]} ↔ {best_pair[1]}</b> at {best_val:.2f}. The neural nets "
+            f"train on a trimmed 5-feature set (<code>{', '.join(NN_FEATURES)}</code>) "
+            f"specifically to reduce redundancy like this before it reaches a sequence model."
         )
+        with st.expander("Pre-validation-split EDA heatmap (train_df only)"):
+            corr_eda = train_df[FEATURES].corr()
+            st.pyplot(fig_correlation_heatmap(corr_eda, "Feature Correlation Matrix (train only)", "coolwarm", mask_upper=True))
 
-        st.divider()
-        eyebrow_title("MODEL ATTENTION", "XGBoost Feature Importance")
-        importances  = model_xgb.feature_importances_
-        feat_imp_agg = np.zeros(N_FEAT)
-        for idx, imp in enumerate(importances):
-            feat_imp_agg[idx % N_FEAT] += imp
-
-        sorted_idx = np.argsort(feat_imp_agg)
-        fig, ax = plt.subplots(figsize=(10, 5))
-        ax.barh(
-            [FEATURES[i] for i in sorted_idx],
-            feat_imp_agg[sorted_idx],
-            color='steelblue', edgecolor='black', alpha=0.85
-        )
-        ax.set_xlabel('Aggregated Importance (summed over all timesteps)')
-        ax.set_title('XGBoost Feature Importance', fontsize=14)
-        plt.tight_layout()
-        st.pyplot(fig)
-        plt.close(fig)
-
-        top_feat = FEATURES[sorted_idx[-1]]
-        insight(
-            f"<b>{top_feat}</b> dominates XGBoost's split decisions across "
-            f"the {seq_len}-day lookback window. Since XGBoost predicts "
-            f"<i>returns</i> rather than raw price, this reflects which "
-            f"input most consistently helps forecast the next percentage "
-            f"move — not just which column correlates with price level."
-        )
-
-        st.divider()
-        eyebrow_title("MODEL ATTENTION", "SHAP Feature Importance (XGBoost)")
-        with st.spinner("Computing SHAP values — this may take a moment…"):
-            sample_size = min(500, len(X_train_flat))
-            X_shap      = X_train_flat[:sample_size]
-
-            shap_feature_names = [
-                f"{FEATURES[f]}_t-{seq_len - t}"
-                for t in range(seq_len)
-                for f in range(N_FEAT)
-            ]
-
-            explainer   = shap.TreeExplainer(model_xgb)
-            shap_values = explainer.shap_values(X_shap)
-
-            # Summary plot (top 20 named lags)
-            fig, _ = plt.subplots(figsize=(10, 7))
-            shap.summary_plot(
-                shap_values, X_shap,
-                feature_names=shap_feature_names,
-                max_display=20, show=False
-            )
-            plt.tight_layout()
-            st.pyplot(fig)
-            plt.close(fig)
-
-            # Aggregated bar
-            shap_agg = np.zeros(N_FEAT)
-            for feature_idx in range(N_FEAT):
-                cols_idx = np.arange(feature_idx, X_shap.shape[1], N_FEAT)
-                shap_agg[feature_idx] = np.mean(
-                    np.abs(shap_values[:, cols_idx])
-                )
-
-            sorted_shap = np.argsort(shap_agg)
-            fig, ax = plt.subplots(figsize=(9, 5))
-            ax.barh(
-                [FEATURES[i] for i in sorted_shap],
-                shap_agg[sorted_shap],
-                color='purple', edgecolor='black'
-            )
-            ax.set_xlabel('Mean Absolute SHAP Value')
-            ax.set_title('SHAP Feature Importance (Aggregated)', fontsize=14)
-            plt.tight_layout()
-            st.pyplot(fig)
-            plt.close(fig)
-
-            top_shap_feat = FEATURES[sorted_shap[-1]]
-            agree = "agrees with" if top_shap_feat == top_feat else "differs from"
+        if "XGBoost" in models:
+            st.divider()
+            eyebrow_title("MODEL ATTENTION", "XGBoost Feature Importance")
+            importances = models["XGBoost"].feature_importances_
+            agg = np.zeros(N_FEAT)
+            for idx, imp in enumerate(importances):
+                agg[idx % N_FEAT] += imp
+            st.pyplot(fig_barh_importance(
+                FEATURES, agg, "steelblue",
+                "Aggregated Importance (summed over all timesteps)", "XGBoost Feature Importance",
+            ))
+            top_feat = FEATURES[int(np.argmax(agg))]
             insight(
-                f"SHAP's top driver, <b>{top_shap_feat}</b>, {agree} the "
-                f"raw importance ranking. SHAP is the more trustworthy read "
-                f"here — it accounts for feature interactions and "
-                f"direction of effect, not just split-count frequency, so "
-                f"it's the better citation if you're explaining <i>why</i> "
-                f"the model predicts what it does, not just <i>what</i> it "
-                f"weighs most."
+                f"<b>{top_feat}</b> dominates XGBoost's split decisions across the "
+                f"{SEQ_LEN}-day window. Since XGBoost predicts <i>returns</i> rather than "
+                f"raw price, this is the input that most consistently helps forecast the "
+                f"next percentage move — not just what correlates with price level."
             )
+
+            st.divider()
+            eyebrow_title("MODEL ATTENTION", "SHAP Feature Importance (XGBoost)")
+            with st.spinner("Computing SHAP values…"):
+                shap_values, X_shap = compute_shap(models["XGBoost"], seq["X_train_flat"])
+            shap_feature_names = [f"{FEATURES[f]}_t-{SEQ_LEN - t}" for t in range(SEQ_LEN) for f in range(N_FEAT)]
+
+            fig, _ = plt.subplots(figsize=(9, 7))
+            shap.summary_plot(shap_values, X_shap, feature_names=shap_feature_names, max_display=20, show=False)
+            plt.tight_layout()
+            st.pyplot(fig)
+            plt.close(fig)
+
+            shap_agg = np.zeros(N_FEAT)
+            for f in range(N_FEAT):
+                cols_idx = np.arange(f, X_shap.shape[1], N_FEAT)
+                shap_agg[f] = np.mean(np.abs(shap_values[:, cols_idx]))
+            st.pyplot(fig_barh_importance(
+                FEATURES, shap_agg, "purple", "Mean Absolute SHAP Value",
+                "SHAP Feature Importance (Aggregated)",
+            ))
+            top_shap = FEATURES[int(np.argmax(shap_agg))]
+            agree = "agrees with" if top_shap == top_feat else "differs from"
+            insight(
+                f"SHAP's top driver, <b>{top_shap}</b>, {agree} the raw split-count "
+                f"ranking. SHAP accounts for feature interactions and direction of "
+                f"effect, not just split frequency — it's the better citation for "
+                f"<i>why</i> the model predicts what it does."
+            )
+        else:
+            st.info("XGBoost isn't loaded, so feature-importance and SHAP views aren't available.")
+
+# ======================================================================
+# MAIN
+# ======================================================================
+def main():
+    render_sidebar_header()
+
+    train_raw, test_raw, source_label = resolve_data_source()
+    if train_raw is None:
+        render_no_data_landing()
+        return
+
+    try:
+        validate_required_columns(train_raw, "Training set")
+        validate_required_columns(test_raw, "Test set")
+        train_data, test_data, rows_dropped, chron_warning = engineer_features(train_raw, test_raw)
+        train_df, val_df = split_train_val(train_data)
+        scaler = MinMaxScaler(feature_range=(0, 1))
+        scaler.fit(train_df[FEATURES].values)
+        seq = build_all_sequences(train_df, val_df, train_data, test_data, scaler)
+    except Exception as e:
+        render_data_error(e)
+        return
+
+    st.session_state.setdefault("model_version", 0)
+
+    if st.session_state.get("_run_training"):
+        with st.status("Running full training pipeline (mirrors STMP.ipynb)…", expanded=True) as status:
+            train_all_models(seq, MODELS_DIR)
+            load_models.clear()
+            st.session_state["model_version"] += 1
+            status.update(label="Training complete — models saved to models/.", state="complete")
+        st.session_state["_run_training"] = False
+        st.rerun()
+
+    models, model_errors = load_models(str(MODELS_DIR), st.session_state["model_version"])
+    histories = load_histories(MODELS_DIR)
+
+    st.markdown('<div class="hero-title">📈 Stock Price Prediction</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="hero-sub">Five architecturally different models, one dataset — '
+        'a controlled test of what\'s actually learnable in daily price data.</div>',
+        unsafe_allow_html=True,
+    )
+
+    if not models:
+        render_no_models_state(model_errors, seq, MODELS_DIR)
+        render_sidebar_footer(source_label, rows_dropped, chron_warning)
+        return
+
+    try:
+        results = run_inference(models, seq, scaler)
+        render_dashboard(train_data, val_df, train_df, val_df, test_data,
+                          seq, models, model_errors, results, histories, MODELS_DIR)
+    except Exception as e:
+        st.error(f"Inference failed: {e}")
+        with st.expander("Full traceback"):
+            st.code(traceback.format_exc())
+
+    render_sidebar_footer(source_label, rows_dropped, chron_warning)
+
+
+if __name__ == "__main__":
+    main()
