@@ -229,7 +229,12 @@ Stock-Market-Prediction/
 2. Upload `data/Trainset.xlsx` and `data/Testset.xlsx` when prompted
 3. Run all cells in order
 
-### Option B — Streamlit App (Local)
+### Option B — Notebook (Local Jupyter / VS Code)
+Clone the repo and open `notebook/STMPfinalfr.ipynb` directly (in Jupyter, 
+JupyterLab, or VS Code). The notebook automatically locates the `data/` 
+folder relative to its own location — no path changes needed.
+
+### Option C — Streamlit App (Local)
 
 ```bash
 # Clone the repository
