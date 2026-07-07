@@ -107,7 +107,7 @@ A few choices are visible directly in the notebook as fixes to earlier mistakes,
 
 ### Setup — Landing State
 
-On a fresh clone (no `models/` folder), the dashboard walks through exactly what's missing and why, with a one-click way to fix it:
+On a fresh clone (with no trained models present), the dashboard explains what's missing, why it isn't available yet, and provides a one-click option to train all five models locally:
 
 ![No trained models found — landing / setup screen](screenshots/0_landing_pg.png)
 
