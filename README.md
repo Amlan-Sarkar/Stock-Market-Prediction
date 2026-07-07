@@ -229,11 +229,9 @@ Stock-Market-Prediction/
 │   ├── 8_residual_dist.png
 │   ├── 9_residual_scatter.png
 │   ├── 10_feature_correlation.png
-│   ├── 11_feature_correlation.png
-│   ├── 12_xgb_imp.png
-│   ├── 13_shap_imp.png
-│   ├── 14_shap_imp.png
-│   └── 15_shap_imp_agg.png
+│   ├── 11_xgb_imp.png
+│   ├── 12_shap_imp.png
+│   └── 13_shap_imp_agg.png
 └── models/                         # NOT in version control — generated locally
     ├── best_bilstm.keras
     ├── best_gru.keras
