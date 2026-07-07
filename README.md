@@ -162,7 +162,7 @@ Residual-vs-predicted scatter (does error grow with price level?):
 
 ### 🧬 Feature Insights Tab
 
-Full 9-feature correlation heatmap on the training set, and the pre-split EDA heatmap in an expander:
+Full 9-feature correlation heatmap on the training set:
 
 ![Full feature correlation heatmap](screenshots/10_feature_correlation.png)
 
