@@ -165,20 +165,18 @@ Residual-vs-predicted scatter (does error grow with price level?):
 Full 9-feature correlation heatmap on the training set, and the pre-split EDA heatmap in an expander:
 
 ![Full feature correlation heatmap](screenshots/10_feature_correlation.png)
-![Pre-split EDA correlation heatmap (train_df only, upper triangle masked)](screenshots/11_feature_correlation.png)
 
 XGBoost's aggregated feature importance, summed across all 60 lookback timesteps:
 
-![XGBoost feature importance](screenshots/12_xgb_imp.png)
+![XGBoost feature importance](screenshots/11_xgb_imp.png)
 
 SHAP summary plot with human-readable `feature_t-lag` labels instead of raw column indices — the fix that made this legible in the first place:
 
-![SHAP summary plot, part 1](screenshots/13_shap_imp.png)
-![SHAP summary plot, part 2](screenshots/14_shap_imp.png)
+![SHAP summary plot, part 1](screenshots/12_shap_imp.png)
 
 SHAP's aggregated mean-absolute importance per feature, for a second opinion against XGBoost's split-count ranking above:
 
-![SHAP aggregated feature importance](screenshots/15_shap_imp_agg.png)
+![SHAP aggregated feature importance](screenshots/13_shap_imp_agg.png)
 
 ### Sidebar
 
